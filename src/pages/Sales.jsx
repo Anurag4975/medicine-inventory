@@ -1,45 +1,30 @@
-import { useEffect, useState, useRef } from "react";
-import {
-  Typography,
-  Box,
-  TextField,
-  Button,
-  Select,
-  MenuItem,
-  FormControl,
-  InputLabel,
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableRow,
-} from "@mui/material";
-import {
-  collection,
-  getDocs,
-  doc,
-  getDoc,
-  writeBatch,
-} from "firebase/firestore";
-import { db, auth } from "../firebase";
+import { useState, useEffect } from "react";
+import { Container, Typography, Box, Button } from "@mui/material";
+import { FaShoppingCart } from "react-icons/fa";
+import MedicineSelection from "./MedicineSale/MedicineSelection";
+import PatientDetails from "./MedicineSale/PatientDetails";
+import SelectedMedicines from "./MedicineSale/SelectedMedicines";
+import Receipt from "./MedicineSale/Receipt";
 import { onAuthStateChanged } from "firebase/auth";
-import { useReactToPrint } from "react-to-print"; // Import react-to-print
+import { auth, db } from "../firebase";
+import { collection, getDoc, doc, writeBatch } from "firebase/firestore";
 
 function Sales() {
   const [stocks, setStocks] = useState([]);
   const [selectedMedicines, setSelectedMedicines] = useState([]);
-  const [medicineId, setMedicineId] = useState("");
-  const [quantity, setQuantity] = useState("");
   const [patient, setPatient] = useState({
     name: "",
     age: "",
     gender: "",
     address: "",
+    phone: "",
   });
   const [discount, setDiscount] = useState("");
+  const [paymentType, setPaymentType] = useState("fullyPaid");
+  const [paidAmount, setPaidAmount] = useState("");
+  const [paymentMethod, setPaymentMethod] = useState("Offline");
   const [receipt, setReceipt] = useState(null);
   const [userRole, setUserRole] = useState(null);
-  const receiptRef = useRef(); // Ref for the receipt content
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
@@ -51,61 +36,51 @@ function Sales() {
     return () => unsubscribe();
   }, []);
 
-  useEffect(() => {
-    const fetchStocks = async () => {
-      const stockCollection = collection(db, "Stock");
-      const stockSnapshot = await getDocs(stockCollection);
-      const stockList = stockSnapshot.docs.map((doc) => ({
-        id: doc.id,
-        ...doc.data(),
-      }));
-      setStocks(stockList);
-    };
-    fetchStocks();
-  }, []);
-
-  const handleAddMedicine = () => {
-    const selectedStock = stocks.find((stock) => stock.id === medicineId);
-    if (selectedStock && quantity > 0 && quantity <= selectedStock.quantity) {
-      setSelectedMedicines([
-        ...selectedMedicines,
-        {
-          id: selectedStock.id,
-          medicineName: selectedStock.medicineName,
-          brand: selectedStock.brand,
-          pricePerTab: selectedStock.pricePerTab,
-          quantity: parseInt(quantity, 10),
-          total: selectedStock.pricePerTab * parseInt(quantity, 10),
-        },
-      ]);
-      setMedicineId("");
-      setQuantity("");
-    } else {
-      alert("Invalid quantity or medicine not found.");
+  const validateNumericInput = (value, setter) => {
+    if (value === "" || (!isNaN(value) && Number(value) >= 0)) {
+      setter(value);
     }
   };
 
-  const calculateTotal = () => {
-    const subtotal = selectedMedicines.reduce(
-      (sum, item) => sum + item.total,
-      0
-    );
-    const discountAmount = discount ? parseFloat(discount) : 0;
-    return subtotal - discountAmount;
-  };
+  const handleSubmitSale = async (
+    selectedMedicines,
+    patient,
+    discount,
+    paymentType,
+    paidAmount,
+    paymentMethod,
+    setReceipt,
+    setSelectedMedicines,
+    setPatient,
+    setDiscount,
+    setPaidAmount,
+    setPaymentMethod,
+    userRole
+  ) => {
+    const total = calculateTotal(selectedMedicines, discount);
+    const paid = parseFloat(paidAmount) || 0;
+    const creditAmount = paymentType === "partiallyPaid" ? total - paid : 0;
 
-  const handleSubmitSale = async () => {
-    const total = calculateTotal();
+    const now = new Date();
+    const datePart = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(
+      2,
+      "0"
+    )}${String(now.getDate()).padStart(2, "0")}`;
+    const randomPart = Math.floor(1000 + Math.random() * 9000);
+    const billNumber = `${datePart}-${randomPart}`;
+
     const saleData = {
+      billNumber,
       patient,
       medicines: selectedMedicines,
       discount: discount ? parseFloat(discount) : 0,
       totalAmount: total,
-      saleDate: new Date().toISOString(),
-      seller: {
-        uid: auth.currentUser.uid,
-        role: userRole,
-      },
+      paymentType,
+      paidAmount: paid,
+      paymentMethod, // Include paymentMethod in Firebase data
+      creditAmount: creditAmount,
+      saleDate: now.toISOString(),
+      seller: { uid: auth.currentUser.uid, role: userRole },
     };
 
     try {
@@ -117,13 +92,11 @@ function Sales() {
         selectedMedicines.map(async (med) => {
           const stockRef = doc(db, "Stock", med.id);
           const stockDoc = await getDoc(stockRef);
-          if (!stockDoc.exists()) {
-            throw new Error(`Stock item NPR {med.id} not found`);
-          }
+          if (!stockDoc.exists())
+            throw new Error(`Stock item ${med.id} not found`);
           const currentQuantity = stockDoc.data().quantity;
-          if (currentQuantity < med.quantity) {
-            throw new Error(`Insufficient stock for NPR {med.medicineName}`);
-          }
+          if (currentQuantity < med.quantity)
+            throw new Error(`Insufficient stock for ${med.medicineName}`);
           return { ref: stockRef, newQuantity: currentQuantity - med.quantity };
         })
       );
@@ -139,8 +112,10 @@ function Sales() {
 
       setReceipt({ ...saleData, id: saleRef.id });
       setSelectedMedicines([]);
-      setPatient({ name: "", age: "", gender: "", address: "" });
+      setPatient({ name: "", age: "", gender: "", address: "", phone: "" });
       setDiscount("");
+      setPaidAmount("");
+      setPaymentMethod("Offline");
       alert("Sale recorded successfully!");
     } catch (error) {
       console.error("Error recording sale:", error);
@@ -148,176 +123,157 @@ function Sales() {
     }
   };
 
-  // Print handler using react-to-print
-  const handlePrint = useReactToPrint({
-    content: () => receiptRef.current,
-    documentTitle: `Receipt_NPR {receipt?.id || "unknown"}`,
-  });
+  const calculateTotal = (selectedMedicines, discount) => {
+    const subtotal = selectedMedicines.reduce(
+      (sum, item) => sum + item.total,
+      0
+    );
+    const discountAmount = discount ? parseFloat(discount) : 0;
+    return subtotal - discountAmount;
+  };
 
   return (
-    <Box sx={{ p: 3 }}>
-      <Typography variant="h4" gutterBottom>
-        Sales
-      </Typography>
-      <Box sx={{ mb: 3 }}>
-        <FormControl fullWidth sx={{ mb: 2 }}>
-          <InputLabel>Medicine</InputLabel>
-          <Select
-            value={medicineId}
-            onChange={(e) => setMedicineId(e.target.value)}
-            label="Medicine"
-          >
-            {stocks.map((stock) => (
-              <MenuItem key={stock.id} value={stock.id}>
-                {stock.medicineName} ({stock.brand}) - NPR{" "}
-                {stock.pricePerTab.toFixed(2)}
-              </MenuItem>
-            ))}
-          </Select>
-        </FormControl>
-        <TextField
-          label="Quantity"
-          type="number"
-          fullWidth
-          value={quantity}
-          onChange={(e) => setQuantity(e.target.value)}
-          sx={{ mb: 2 }}
+    <Container
+      maxWidth="lg"
+      sx={{
+        mt: 2,
+        mb: 2,
+        height: "100vh",
+        display: "flex",
+        flexDirection: "column",
+      }}
+    >
+      <Box
+        sx={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          mb: 2,
+        }}
+      >
+        <FaShoppingCart
+          size={32}
+          color="#1976D2"
+          style={{ marginRight: "8px" }}
         />
-        <Button variant="contained" onClick={handleAddMedicine}>
-          Add Medicine
-        </Button>
+        <Typography
+          variant="h4"
+          sx={{ fontWeight: "bold", color: "#1976D2", textAlign: "center" }}
+        >
+          Sales
+        </Typography>
       </Box>
-      {selectedMedicines.length > 0 && (
-        <Table sx={{ mb: 3 }}>
-          <TableHead>
-            <TableRow>
-              <TableCell>Medicine Name</TableCell>
-              <TableCell>Brand</TableCell>
-              <TableCell>Price/Tab</TableCell>
-              <TableCell>Quantity</TableCell>
-              <TableCell>Total</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {selectedMedicines.map((med, index) => (
-              <TableRow key={index}>
-                <TableCell>{med.medicineName}</TableCell>
-                <TableCell>{med.brand}</TableCell>
-                <TableCell>NPR {med.pricePerTab.toFixed(2)}</TableCell>
-                <TableCell>{med.quantity}</TableCell>
-                <TableCell>NPR {med.total.toFixed(2)}</TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      )}
-      <Box sx={{ mb: 3 }}>
-        <TextField
-          label="Patient Name"
-          fullWidth
-          value={patient.name}
-          onChange={(e) => setPatient({ ...patient, name: e.target.value })}
-          sx={{ mb: 2 }}
-        />
-        <TextField
-          label="Age"
-          type="number"
-          fullWidth
-          value={patient.age}
-          onChange={(e) => setPatient({ ...patient, age: e.target.value })}
-          sx={{ mb: 2 }}
-        />
-        <FormControl fullWidth sx={{ mb: 2 }}>
-          <InputLabel>Gender</InputLabel>
-          <Select
-            value={patient.gender}
-            onChange={(e) => setPatient({ ...patient, gender: e.target.value })}
-            label="Gender"
-          >
-            <MenuItem value="Male">Male</MenuItem>
-            <MenuItem value="Female">Female</MenuItem>
-            <MenuItem value="Other">Other</MenuItem>
-          </Select>
-        </FormControl>
-        <TextField
-          label="Address (Optional)"
-          fullWidth
-          value={patient.address}
-          onChange={(e) => setPatient({ ...patient, address: e.target.value })}
-          sx={{ mb: 2 }}
-        />
-        <TextField
-          label="Discount Amount (Optional)"
-          type="number"
-          fullWidth
-          value={discount}
-          onChange={(e) => setDiscount(e.target.value)}
-          sx={{ mb: 2 }}
-        />
+
+      <Box
+        sx={{
+          flexGrow: 1,
+          display: "flex",
+          flexDirection: { xs: "column", md: "row" },
+          gap: 2,
+          overflow: "hidden",
+        }}
+      >
+        {/* Left Column: Medicine Selection and Patient Details */}
+        <Box
+          sx={{
+            flex: { xs: "none", md: 1 },
+            display: "flex",
+            flexDirection: "column",
+            gap: 2,
+            maxHeight: { xs: "auto", md: "calc(100vh - 120px)" },
+            overflowY: "auto",
+          }}
+        >
+          <MedicineSelection
+            stocks={stocks}
+            setStocks={setStocks}
+            selectedMedicines={selectedMedicines}
+            setSelectedMedicines={setSelectedMedicines}
+          />
+          <PatientDetails
+            patient={patient}
+            setPatient={setPatient}
+            discount={discount}
+            setDiscount={(value) => validateNumericInput(value, setDiscount)}
+            paymentType={paymentType}
+            setPaymentType={setPaymentType}
+            paidAmount={paidAmount}
+            setPaidAmount={(value) =>
+              validateNumericInput(value, setPaidAmount)
+            }
+            paymentMethod={paymentMethod}
+            setPaymentMethod={setPaymentMethod}
+          />
+        </Box>
+
+        {/* Right Column: Selected Medicines and Receipt */}
+        <Box
+          sx={{
+            flex: { xs: "none", md: 1 },
+            display: "flex",
+            flexDirection: "column",
+            gap: 2,
+            maxHeight: { xs: "auto", md: "calc(100vh - 120px)" },
+            overflowY: "auto",
+          }}
+        >
+          {selectedMedicines.length > 0 && (
+            <SelectedMedicines
+              selectedMedicines={selectedMedicines}
+              setSelectedMedicines={setSelectedMedicines}
+            />
+          )}
+          {receipt && <Receipt receipt={receipt} />}
+        </Box>
       </Box>
+
       <Button
         variant="contained"
-        color="primary"
-        onClick={handleSubmitSale}
+        onClick={() =>
+          handleSubmitSale(
+            selectedMedicines,
+            patient,
+            discount,
+            paymentType,
+            paidAmount,
+            paymentMethod,
+            setReceipt,
+            setSelectedMedicines,
+            setPatient,
+            setDiscount,
+            setPaidAmount,
+            setPaymentMethod,
+            userRole
+          )
+        }
         disabled={selectedMedicines.length === 0 || !patient.name || !userRole}
+        sx={{
+          mt: 2,
+          mx: "auto",
+          bgcolor: "#1976D2",
+          "&:hover": { bgcolor: "#115293", transform: "scale(1.05)" },
+          transition: "transform 0.3s ease, background-color 0.3s ease",
+          borderRadius: 2,
+          px: 3,
+          py: 1,
+          fontWeight: "bold",
+        }}
       >
         Record Sale
       </Button>
-      {receipt && (
-        <Box sx={{ mt: 3 }}>
-          <div ref={receiptRef}>
-            <Box sx={{ p: 2, border: "1px solid #ccc" }}>
-              <Typography variant="h6">Receipt</Typography>
-              <Typography>Patient: {receipt.patient.name}</Typography>
-              <Typography>Age: {receipt.patient.age}</Typography>
-              <Typography>Gender: {receipt.patient.gender}</Typography>
-              {receipt.patient.address && (
-                <Typography>Address: {receipt.patient.address}</Typography>
-              )}
-              <Table>
-                <TableHead>
-                  <TableRow>
-                    <TableCell>Medicine</TableCell>
-                    <TableCell>Brand</TableCell>
-                    <TableCell>Price/Tab</TableCell>
-                    <TableCell>Quantity</TableCell>
-                    <TableCell>Total</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {receipt.medicines.map((med, index) => (
-                    <TableRow key={index}>
-                      <TableCell>{med.medicineName}</TableCell>
-                      <TableCell>{med.brand}</TableCell>
-                      <TableCell>NPR {med.pricePerTab.toFixed(2)}</TableCell>
-                      <TableCell>{med.quantity}</TableCell>
-                      <TableCell>NPR {med.total.toFixed(2)}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-              <Typography>
-                Discount: NPR {receipt.discount.toFixed(2)}
-              </Typography>
-              <Typography variant="h6">
-                Total Amount: NPR {receipt.totalAmount.toFixed(2)}
-              </Typography>
-              <Typography>
-                Sale Date: {new Date(receipt.saleDate).toLocaleString()}
-              </Typography>
-            </Box>
-          </div>
-          <Button
-            variant="outlined"
-            color="primary"
-            onClick={handlePrint}
-            sx={{ mt: 2 }}
-          >
-            Print Receipt
-          </Button>
-        </Box>
-      )}
-    </Box>
+
+      <style>{`
+        @keyframes fadeIn {
+          from { opacity: 0; }
+          to { opacity: 1; }
+        }
+        @keyframes slideInUp {
+          from { opacity: 0; transform: translateY(20px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        .MuiBox-root { animation: fadeIn 1s ease-in; }
+      `}</style>
+    </Container>
   );
 }
 
