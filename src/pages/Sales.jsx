@@ -55,7 +55,7 @@ function Sales() {
     setDiscount,
     setPaidAmount,
     setPaymentMethod,
-    userRole
+    userRole,
   ) => {
     const total = calculateTotal(selectedMedicines, discount);
     const paid = parseFloat(paidAmount) || 0;
@@ -64,7 +64,7 @@ function Sales() {
     const now = new Date();
     const datePart = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(
       2,
-      "0"
+      "0",
     )}${String(now.getDate()).padStart(2, "0")}`;
     const randomPart = Math.floor(1000 + Math.random() * 9000);
     const billNumber = `${datePart}-${randomPart}`;
@@ -98,7 +98,7 @@ function Sales() {
           if (currentQuantity < med.quantity)
             throw new Error(`Insufficient stock for ${med.medicineName}`);
           return { ref: stockRef, newQuantity: currentQuantity - med.quantity };
-        })
+        }),
       );
 
       stockChecks.forEach(({ ref, newQuantity }) => {
@@ -126,7 +126,7 @@ function Sales() {
   const calculateTotal = (selectedMedicines, discount) => {
     const subtotal = selectedMedicines.reduce(
       (sum, item) => sum + item.total,
-      0
+      0,
     );
     const discountAmount = discount ? parseFloat(discount) : 0;
     return subtotal - discountAmount;
@@ -243,7 +243,7 @@ function Sales() {
             setDiscount,
             setPaidAmount,
             setPaymentMethod,
-            userRole
+            userRole,
           )
         }
         disabled={selectedMedicines.length === 0 || !patient.name || !userRole}

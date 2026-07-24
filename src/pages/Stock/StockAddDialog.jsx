@@ -10,7 +10,7 @@ import {
 import { LocalizationProvider } from "@mui/x-date-pickers/LocalizationProvider";
 import { AdapterDateFns } from "@mui/x-date-pickers/AdapterDateFns";
 import { DatePicker } from "@mui/x-date-pickers/DatePicker";
-import { addDoc, collection, getDocs } from "firebase/firestore";
+import { addDoc, collection } from "firebase/firestore";
 import { db } from "../../firebase"; // Adjust the import path as needed
 import { Timestamp } from "firebase/firestore";
 import { FaPlus } from "react-icons/fa";
@@ -60,20 +60,16 @@ const StockAddDialog = ({ open, setOpen, setStocks, setFilteredStocks }) => {
           ? Timestamp.fromDate(newStock.expiryDate)
           : null,
       };
-      await addDoc(collection(db, "Stock"), stockWithTimestamp);
-      const stockSnapshot = await getDocs(collection(db, "Stock"));
-      const updatedStockList = stockSnapshot.docs.map((doc) => {
-        const data = doc.data();
-        return {
-          id: doc.id,
-          ...data,
-          expiryDate: toDateSafe(data.expiryDate),
-          stockAddDate: toDateSafe(data.stockAddDate),
-          lastUpdated: toDateSafe(data.lastUpdated),
-        };
-      });
-      setStocks(updatedStockList);
-      setFilteredStocks(updatedStockList);
+      const docRef = await addDoc(collection(db, "Stock"), stockWithTimestamp);
+      const newItem = {
+        id: docRef.id,
+        ...stockWithTimestamp,
+        expiryDate: toDateSafe(stockWithTimestamp.expiryDate),
+        stockAddDate: toDateSafe(stockWithTimestamp.stockAddDate),
+        lastUpdated: toDateSafe(stockWithTimestamp.lastUpdated),
+      };
+      setStocks((prev) => [...prev, newItem]);
+      setFilteredStocks((prev) => [...prev, newItem]);
       setNewStock({
         medicineName: "",
         brand: "",

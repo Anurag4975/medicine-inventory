@@ -37,6 +37,10 @@ import AddIcon from "@mui/icons-material/Add";
 
 function AdminDashboard() {
   const [doctors, setDoctors] = useState([]);
+  const [employees, setEmployees] = useState([]);
+  const [openEmployeeDialog, setOpenEmployeeDialog] = useState(false);
+  const [employeeData, setEmployeeData] = useState({ name: "", phone: "" });
+  const [editEmployeeId, setEditEmployeeId] = useState(null);
   const [openDialog, setOpenDialog] = useState(false);
   const [doctorData, setDoctorData] = useState({
     nameEnglish: "",
@@ -60,6 +64,7 @@ function AdminDashboard() {
   const designations = [
     "Pediatrics",
     "Geriatrician",
+    "ENT Surgeon",
     "Anesthesiology",
     "Radiologist",
     "Cardiologist",
@@ -83,23 +88,39 @@ function AdminDashboard() {
     "Other",
   ];
 
-  // Fetch doctors on mount
+  // Fetch doctors and employees on mount
   useEffect(() => {
     const fetchDoctors = async () => {
       try {
         const querySnapshot = await getDocs(collection(db, "Doctors"));
-        const doctorData = querySnapshot.docs.map((doc) => ({
+        const doctorsData = querySnapshot.docs.map((doc) => ({
           id: doc.id,
           ...doc.data(),
         }));
-        setDoctors(doctorData);
+        setDoctors(doctorsData);
       } catch (error) {
         console.error("Error fetching doctors: ", error);
       }
     };
+
+    const fetchEmployees = async () => {
+      try {
+        const querySnapshot = await getDocs(collection(db, "Employees"));
+        const employeeData = querySnapshot.docs.map((doc) => ({
+          id: doc.id,
+          ...doc.data(),
+        }));
+        setEmployees(employeeData);
+      } catch (error) {
+        console.error("Error fetching employees: ", error);
+      }
+    };
+
     fetchDoctors();
+    fetchEmployees();
   }, []);
 
+  // Doctor handlers
   const handleOpenDialog = (id = null, doctor = null) => {
     setEditDoctorId(id);
     if (id && doctor) {
@@ -207,7 +228,7 @@ function AdminDashboard() {
           !degree.degreeEnglish ||
           !degree.degreeNepali ||
           !degree.institutionEnglish ||
-          !degree.institutionNepali
+          !degree.institutionNepali,
       )
     ) {
       alert("Please fill in all fields for the doctor and their degrees.");
@@ -221,8 +242,8 @@ function AdminDashboard() {
         await updateDoc(doctorRef, doctorData);
         setDoctors((prev) =>
           prev.map((doc) =>
-            doc.id === editDoctorId ? { ...doc, ...doctorData } : doc
-          )
+            doc.id === editDoctorId ? { ...doc, ...doctorData } : doc,
+          ),
         );
       } else {
         // Add new doctor
@@ -245,6 +266,66 @@ function AdminDashboard() {
     } catch (error) {
       console.error("Error deleting doctor: ", error);
       alert("Failed to delete doctor: " + error.message);
+    }
+  };
+
+  // Employee handlers
+  const handleOpenEmployeeDialog = (id = null, employee = null) => {
+    setEditEmployeeId(id);
+    setEmployeeData(
+      id && employee
+        ? { name: employee.name || "", phone: employee.phone || "" }
+        : { name: "", phone: "" },
+    );
+    setOpenEmployeeDialog(true);
+  };
+
+  const handleCloseEmployeeDialog = () => {
+    setOpenEmployeeDialog(false);
+    setEditEmployeeId(null);
+    setEmployeeData({ name: "", phone: "" });
+  };
+
+  const handleEmployeeChange = (e) => {
+    setEmployeeData({ ...employeeData, [e.target.name]: e.target.value });
+  };
+
+  const handleSaveEmployee = async () => {
+    if (!employeeData.name) {
+      alert("Please enter the employee's name.");
+      return;
+    }
+
+    try {
+      if (editEmployeeId) {
+        const employeeRef = doc(db, "Employees", editEmployeeId);
+        await updateDoc(employeeRef, employeeData);
+        setEmployees((prev) =>
+          prev.map((emp) =>
+            emp.id === editEmployeeId ? { ...emp, ...employeeData } : emp,
+          ),
+        );
+      } else {
+        const docRef = await addDoc(collection(db, "Employees"), employeeData);
+        setEmployees((prev) => [...prev, { id: docRef.id, ...employeeData }]);
+      }
+      handleCloseEmployeeDialog();
+    } catch (error) {
+      console.error("Error saving employee: ", error);
+      alert("Failed to save employee: " + error.message);
+    }
+  };
+
+  const handleDeleteEmployee = async (id) => {
+    if (!window.confirm("Are you sure you want to delete this employee?"))
+      return;
+
+    try {
+      await deleteDoc(doc(db, "Employees", id));
+      setEmployees((prev) => prev.filter((emp) => emp.id !== id));
+    } catch (error) {
+      console.error("Error deleting employee: ", error);
+      alert("Failed to delete employee: " + error.message);
     }
   };
 
@@ -319,6 +400,51 @@ function AdminDashboard() {
                     <EditIcon />
                   </IconButton>
                   <IconButton onClick={() => handleDeleteDoctor(doctor.id)}>
+                    <DeleteIcon />
+                  </IconButton>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </Box>
+
+      {/* Employee Management Section */}
+      <Box sx={{ mt: 4 }}>
+        <Typography variant="h5" gutterBottom>
+          Manage Employees
+        </Typography>
+        <Button
+          variant="contained"
+          color="primary"
+          onClick={() => handleOpenEmployeeDialog()}
+          sx={{ mb: 2 }}
+        >
+          Add Employee
+        </Button>
+        <Table>
+          <TableHead>
+            <TableRow>
+              <TableCell>Employee Name</TableCell>
+              <TableCell>Phone Number</TableCell>
+              <TableCell>Actions</TableCell>
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {employees.map((employee) => (
+              <TableRow key={employee.id}>
+                <TableCell>{employee.name || "N/A"}</TableCell>
+                <TableCell>{employee.phone || "N/A"}</TableCell>
+                <TableCell>
+                  <IconButton
+                    onClick={() =>
+                      handleOpenEmployeeDialog(employee.id, employee)
+                    }
+                    sx={{ mr: 1 }}
+                  >
+                    <EditIcon />
+                  </IconButton>
+                  <IconButton onClick={() => handleDeleteEmployee(employee.id)}>
                     <DeleteIcon />
                   </IconButton>
                 </TableCell>
@@ -450,7 +576,7 @@ function AdminDashboard() {
                       handleDegreeChange(
                         index,
                         "institutionEnglish",
-                        e.target.value
+                        e.target.value,
                       )
                     }
                     margin="normal"
@@ -464,7 +590,7 @@ function AdminDashboard() {
                       handleDegreeChange(
                         index,
                         "institutionNepali",
-                        e.target.value
+                        e.target.value,
                       )
                     }
                     margin="normal"
@@ -495,6 +621,43 @@ function AdminDashboard() {
         <DialogActions>
           <Button onClick={handleCloseDialog}>Cancel</Button>
           <Button onClick={handleSaveDoctor} variant="contained">
+            Save
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Employee Dialog */}
+      <Dialog
+        open={openEmployeeDialog}
+        onClose={handleCloseEmployeeDialog}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>
+          {editEmployeeId ? "Edit Employee" : "Add Employee"}
+        </DialogTitle>
+        <DialogContent>
+          <TextField
+            fullWidth
+            label="Employee Name"
+            name="name"
+            value={employeeData.name}
+            onChange={handleEmployeeChange}
+            margin="normal"
+            required
+          />
+          <TextField
+            fullWidth
+            label="Phone Number"
+            name="phone"
+            value={employeeData.phone}
+            onChange={handleEmployeeChange}
+            margin="normal"
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseEmployeeDialog}>Cancel</Button>
+          <Button onClick={handleSaveEmployee} variant="contained">
             Save
           </Button>
         </DialogActions>

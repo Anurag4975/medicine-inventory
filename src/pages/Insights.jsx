@@ -58,7 +58,6 @@ function Insights() {
         >
           Sales Insights
         </Typography>
-
         <Box sx={{ display: "flex", justifyContent: "center", mb: 3 }}>
           <FormControlLabel
             control={
@@ -86,7 +85,6 @@ function Insights() {
           setFilteredSales={setFilteredSales}
           setLoading={setLoading}
         />
-
         {loading ? (
           <Typography sx={{ textAlign: "center", mt: 5 }}>
             Loading...

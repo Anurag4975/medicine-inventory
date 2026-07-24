@@ -110,7 +110,7 @@ const LabBilling = () => {
     try {
       const q = query(
         collection(db, "labReceipts"),
-        where("patient.phone", "==", searchPatientPhone)
+        where("patient.phone", "==", searchPatientPhone),
       );
       const snapshot = await getDocs(q);
       const visits = snapshot.docs.map((doc) => ({
@@ -222,7 +222,7 @@ const LabBilling = () => {
 
   // Filter tests based on search
   const filteredTests = tests.filter((test) =>
-    test.name.toLowerCase().includes(searchTerm.toLowerCase())
+    test.name.toLowerCase().includes(searchTerm.toLowerCase()),
   );
 
   return (
@@ -545,7 +545,7 @@ const LabBilling = () => {
                   <TextField
                     label="Doctor Commission"
                     value={`${calculateCommission().toFixed(
-                      2
+                      2,
                     )} (${doctorCommission}%)`}
                     fullWidth
                     size="small"

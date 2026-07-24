@@ -1,27 +1,119 @@
 import { useState, useEffect } from "react";
-import { Box, Button, Grid, Typography, useMediaQuery } from "@mui/material";
-import {
-  FaHome,
-  FaBox,
-  FaShoppingCart,
-  FaChartLine,
-  FaUserPlus,
-  FaFlask,
-  FaUsers,
-  FaTachometerAlt,
-  FaUndo,
-} from "react-icons/fa";
 import { useNavigate } from "react-router-dom";
 import { onAuthStateChanged } from "firebase/auth";
-import { auth, db } from "../firebase";
 import { doc, getDoc } from "firebase/firestore";
+import { auth, db } from "../firebase";
+import {
+  Box,
+  Button,
+  Grid,
+  Typography,
+  Card,
+  CardContent,
+  Container,
+  Fade,
+  alpha,
+  Avatar,
+} from "@mui/material";
+import {
+  Home as HomeIcon,
+  Inventory as InventoryIcon,
+  ShoppingCart as ShoppingCartIcon,
+  Analytics as AnalyticsIcon,
+  PersonAdd as PersonAddIcon,
+  Science as ScienceIcon,
+  People as PeopleIcon,
+  Dashboard as DashboardIcon,
+  Undo as UndoIcon,
+} from "@mui/icons-material";
+
+const iconColors = {
+  "/stock": "#FF9800",
+  "/sales": "#2196F3",
+  "/insights": "#9C27B0",
+  "/patient-registration": "#F44336",
+  "/lab-tests": "#00BCD4",
+  "/patient-records": "#795548",
+  "/dashboard": "#607D8B",
+  "/Returns": "#E91E63",
+  "/consulting": "#FF5722",
+  "/clinical-charts": "#4CAF50",
+};
+
+const navigationItems = [
+  {
+    label: "Consulting",
+    icon: <PeopleIcon sx={{ fontSize: 24 }} />,
+    path: "/consulting",
+    description: "Manage patient consultations",
+  },
+  {
+    label: "Stock Management",
+    icon: <InventoryIcon sx={{ fontSize: 24 }} />,
+    path: "/stock",
+    adminOnly: true,
+    description: "Manage inventory and stock levels",
+  },
+  {
+    label: "Sales",
+    icon: <ShoppingCartIcon sx={{ fontSize: 24 }} />,
+    path: "/sales",
+    description: "Process sales and transactions",
+  },
+  {
+    label: "Sales Insights",
+    icon: <AnalyticsIcon sx={{ fontSize: 24 }} />,
+    path: "/insights",
+    description: "Analytics and sales reports",
+  },
+  {
+    label: "OPD Registration",
+    icon: <PersonAddIcon sx={{ fontSize: 24 }} />,
+    path: "/patient-registration",
+    description: "Register new patients",
+  },
+  {
+    label: "Laboratory",
+    icon: <ScienceIcon sx={{ fontSize: 24 }} />,
+    path: "/lab-tests",
+    description: "Manage lab tests and results",
+  },
+  {
+    label: "Patient Records",
+    icon: <PeopleIcon sx={{ fontSize: 24 }} />,
+    path: "/patient-records",
+    description: "View patient information",
+  },
+  {
+    label: "Doctors",
+    icon: <DashboardIcon sx={{ fontSize: 24 }} />,
+    path: "/dashboard",
+    description: "Doctors Management",
+  },
+  // START: Clinical Charts Item Added
+  {
+    label: "Clinical Charts",
+    icon: <ScienceIcon sx={{ fontSize: 24 }} />, // Reusing ScienceIcon
+    path: "/clinical-charts",
+    description: "View and manage patient clinical charts (Vitals, BMI, etc.)",
+  },
+  // END: Clinical Charts Item Added
+  {
+    label: "Returns & Refunds",
+    icon: <UndoIcon sx={{ fontSize: 24 }} />,
+    path: "/Returns",
+    restricted: true,
+    description: "Handle returns and refunds",
+  },
+];
 
 function Home({ userRole }) {
   const navigate = useNavigate();
-  const isMobile = useMediaQuery("(max-width:600px)");
   const [role, setRole] = useState(userRole);
+  const [fadeIn, setFadeIn] = useState(false);
 
   useEffect(() => {
+    setFadeIn(true);
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
         const userDoc = await getDoc(doc(db, "Users", user.uid));
@@ -33,123 +125,183 @@ function Home({ userRole }) {
     return () => unsubscribe();
   }, []);
 
-  const navigationItems = [
-    { label: "Home", icon: <FaHome size={32} />, path: "/home" },
-    {
-      label: "Stock",
-      icon: <FaBox size={32} />,
-      path: "/stock",
-      adminOnly: true,
-    },
-    { label: "Sales", icon: <FaShoppingCart size={32} />, path: "/sales" },
-    {
-      label: "Sales-Insights",
-      icon: <FaChartLine size={32} />,
-      path: "/insights",
-    },
-    {
-      label: "OPD Ticket",
-      icon: <FaUserPlus size={32} />,
-      path: "/patient-registration",
-    },
-    { label: "Lab", icon: <FaFlask size={32} />, path: "/lab-tests" },
-    {
-      label: "Patient Records",
-      icon: <FaUsers size={32} />,
-      path: "/patient-records",
-    },
-    {
-      label: "Dashboard",
-      icon: <FaTachometerAlt size={32} />,
-      path: "/dashboard",
-    },
-    {
-      label: "Returns",
-      icon: <FaUndo size={32} />,
-      path: "/Returns",
-      restricted: true, // For admin or staff only
-    },
-  ];
+  const getWelcomeMessage = () => {
+    const hour = new Date().getHours();
+    return hour < 12
+      ? "Good Morning"
+      : hour < 17
+      ? "Good Afternoon"
+      : "Good Evening";
+  };
+
+  const getRoleDisplayName = (role) => {
+    const roles = {
+      admin: "Administrator",
+      staff: "Staff Member",
+      lab: "Lab Technician",
+    };
+    return roles[role] || "User";
+  };
 
   return (
     <Box
       sx={{
-        p: { xs: 2, md: 4 },
-        textAlign: "center",
         minHeight: "100vh",
-        bgcolor: "#f5f5f5",
+        background: "linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%)",
+        position: "relative",
+        overflow: "hidden",
       }}
     >
-      <Typography
-        variant="h4"
-        gutterBottom
-        sx={{ fontWeight: "bold", color: "#1976D2" }}
-      >
-        Welcome to Medicine Inventory
-      </Typography>
-      <Typography variant="body1" sx={{ mb: 4, color: "#555" }}>
-        Manage your stock, track sales, and more!
-      </Typography>
-
-      <Grid container spacing={3} justifyContent="center">
-        {navigationItems.map((item) => {
-          // Skip admin-only items for non-admins and Returns for non-admin/non-staff
-          if (
-            (item.adminOnly && role !== "admin") ||
-            (item.restricted && role !== "admin" && role !== "staff")
-          ) {
-            return null;
-          }
-          return (
-            <Grid
-              item
-              xs={12}
-              sm={6}
-              md={4}
-              key={item.label}
-              sx={{ display: "flex", justifyContent: "center" }}
+      <Container maxWidth="lg" sx={{ py: 4, position: "relative" }}>
+        <Fade in={fadeIn} timeout={800}>
+          <Box sx={{ textAlign: "center", mb: 4 }}>
+            <Typography
+              variant="h3"
+              sx={{
+                fontWeight: 800,
+                background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
+                backgroundClip: "text",
+                color: "transparent",
+                mb: 1,
+                fontSize: { xs: "1.8rem", md: "2.5rem" },
+              }}
             >
-              <Button
-                variant="contained"
-                onClick={() => navigate(item.path)}
+              {getWelcomeMessage()}!
+            </Typography>
+            <Typography variant="h5" sx={{ color: "#555", mb: 2 }}>
+              Welcome to <strong>SADEV</strong>
+            </Typography>
+            {role && (
+              <Box
                 sx={{
-                  width: { xs: "100%", sm: 250 },
-                  height: 120,
-                  display: "flex",
-                  flexDirection: "column",
-                  justifyContent: "center",
+                  display: "inline-flex",
                   alignItems: "center",
-                  bgcolor: "#1976D2",
-                  "&:hover": {
-                    bgcolor: "#115293",
-                    transform: "scale(1.05)",
-                  },
-                  transition: "transform 0.3s ease, background-color 0.3s ease",
-                  borderRadius: 2,
-                  boxShadow: 3,
-                  textTransform: "none",
+                  background: alpha("#667eea", 0.1),
+                  borderRadius: "20px",
+                  px: 2,
+                  py: 0.5,
+                  border: `1px solid ${alpha("#667eea", 0.2)}`,
                 }}
               >
-                <Box sx={{ mb: 1 }}>{item.icon}</Box>
-                <Typography
-                  variant="subtitle1"
-                  sx={{ fontWeight: "bold", color: "#fff" }}
+                <Avatar
+                  sx={{
+                    width: 28,
+                    height: 28,
+                    mr: 1,
+                    background:
+                      "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
+                    fontSize: "0.8rem",
+                  }}
                 >
-                  {item.label}
+                  {role.charAt(0).toUpperCase()}
+                </Avatar>
+                <Typography
+                  variant="body2"
+                  sx={{ color: "#667eea", fontWeight: 600 }}
+                >
+                  Logged in as {getRoleDisplayName(role)}
                 </Typography>
-              </Button>
-            </Grid>
-          );
-        })}
-      </Grid>
-
-      <style>{`
-        @keyframes fadeIn {
-          from { opacity: 0; transform: translateY(20px); }
-          to { opacity: 1; transform: translateY(0); }
-        }
-        .MuiGrid-item { animation: fadeIn 0.5s ease-in; }
-      `}</style>
+              </Box>
+            )}
+          </Box>
+        </Fade>
+        <Grid container spacing={2} justifyContent="center">
+          {navigationItems.map((item, index) => {
+            if (
+              (item.adminOnly && role !== "admin") ||
+              (item.restricted && role !== "admin" && role !== "staff")
+            ) {
+              return null;
+            }
+            return (
+              <Grid item xs={12} sm={6} md={4} lg={3} key={item.label}>
+                <Fade in={fadeIn} timeout={800 + index * 100}>
+                  <Card
+                    sx={{
+                      height: "100%",
+                      cursor: "pointer",
+                      transition: "all 0.3s ease",
+                      background: "rgba(255, 255, 255, 0.9)",
+                      borderRadius: "12px",
+                      boxShadow: "0 4px 12px rgba(0, 0, 0, 0.08)",
+                      "&:hover": {
+                        transform: "translateY(-4px)",
+                        boxShadow: "0 12px 24px rgba(0, 0, 0, 0.12)",
+                        "& .icon-container": {
+                          transform: "scale(1.05)",
+                          background: alpha(
+                            iconColors[item.path] || "#9E9E9E",
+                            0.2
+                          ),
+                        },
+                      },
+                    }}
+                    onClick={() => navigate(item.path)}
+                  >
+                    <CardContent sx={{ p: 2, textAlign: "center" }}>
+                      <Box
+                        className="icon-container"
+                        sx={{
+                          width: 50,
+                          height: 50,
+                          borderRadius: "12px",
+                          background: alpha(
+                            iconColors[item.path] || "#9E9E9E",
+                            0.1
+                          ),
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          mx: "auto",
+                          mb: 1.5,
+                          transition: "all 0.3s ease",
+                          color: iconColors[item.path] || "#9E9E9E",
+                        }}
+                      >
+                        {item.icon}
+                      </Box>
+                      <Typography
+                        variant="subtitle1"
+                        sx={{ fontWeight: 600, mb: 0.5, color: "#333" }}
+                      >
+                        {item.label}
+                      </Typography>
+                      <Typography
+                        variant="body2"
+                        sx={{ color: "#666", fontSize: "0.8rem" }}
+                      >
+                        {item.description}
+                      </Typography>
+                    </CardContent>
+                  </Card>
+                </Fade>
+              </Grid>
+            );
+          })}
+        </Grid>
+        <Fade in={fadeIn} timeout={1000}>
+          <Box
+            sx={{
+              mt: 4,
+              p: 2,
+              background: "rgba(255, 255, 255, 0.8)",
+              borderRadius: "12px",
+              textAlign: "center",
+              boxShadow: "0 4px 12px rgba(0, 0, 0, 0.08)",
+            }}
+          >
+            <Typography variant="h6" sx={{ color: "#555", mb: 1 }}>
+              SADEV
+            </Typography>
+            <Typography
+              variant="body2"
+              sx={{ color: "#777", maxWidth: 500, mx: "auto" }}
+            >
+              Developed by SADEV - Your trusted partner in software
+            </Typography>
+          </Box>
+        </Fade>
+      </Container>
     </Box>
   );
 }

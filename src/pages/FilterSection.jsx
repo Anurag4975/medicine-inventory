@@ -57,7 +57,7 @@ const FilterSection = ({
     filterType,
     selectedDate,
     paymentType,
-    query
+    query,
   ) => {
     const now = new Date();
     let filtered = [];
@@ -99,11 +99,11 @@ const FilterSection = ({
 
     if (paymentType === "credit") {
       filtered = filtered.filter(
-        (sale) => sale.paymentType === "credit" && !sale.creditResolvedDate
+        (sale) => sale.paymentType === "credit" && !sale.creditResolvedDate,
       );
     } else if (paymentType === "partiallyPaid") {
       filtered = filtered.filter(
-        (sale) => sale.paymentType === "partiallyPaid" && sale.creditAmount > 0
+        (sale) => sale.paymentType === "partiallyPaid" && sale.creditAmount > 0,
       );
     } else if (paymentType === "fullyPaid") {
       filtered = filtered.filter((sale) => sale.paymentType === "fullyPaid");
@@ -115,10 +115,10 @@ const FilterSection = ({
         (sale) =>
           sale.patient.name.toLowerCase().includes(lowerCaseQuery) ||
           sale.medicines.some((med) =>
-            med.medicineName.toLowerCase().includes(lowerCaseQuery)
+            med.medicineName.toLowerCase().includes(lowerCaseQuery),
           ) ||
           (sale.billNumber &&
-            sale.billNumber.toLowerCase().includes(lowerCaseQuery))
+            sale.billNumber.toLowerCase().includes(lowerCaseQuery)),
       );
     }
 

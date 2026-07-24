@@ -2,153 +2,237 @@ import {
   Paper,
   Typography,
   Box,
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableRow,
+  TextField,
+  Chip,
+  Stack,
+  Divider,
   IconButton,
-  TableFooter,
 } from "@mui/material";
-import { FaTrash, FaPlus, FaMinus } from "react-icons/fa";
+import { FaCapsules, FaTrash } from "react-icons/fa";
 
 const SelectedMedicines = ({ selectedMedicines, setSelectedMedicines }) => {
-  const handleDeleteMedicine = (id) => {
-    setSelectedMedicines(selectedMedicines.filter((med) => med.id !== id));
-  };
-
-  const handleQuantityChange = (id, change) => {
+  const handleQuantityInput = (id, value) => {
     setSelectedMedicines(
-      selectedMedicines.map((med) => {
-        if (med.id === id) {
-          const newQuantity = med.quantity + change;
-          if (newQuantity < 1) return med; // Prevent quantity from going below 1
-          return {
-            ...med,
-            quantity: newQuantity,
-            total: newQuantity * med.pricePerTab,
-          };
-        }
-        return med;
-      })
+      selectedMedicines.map((med) =>
+        med.id === id
+          ? {
+              ...med,
+              quantity: value === "" ? "" : Number(value),
+              total: value === "" ? 0 : Number(value) * med.pricePerTab,
+            }
+          : med,
+      ),
     );
   };
 
-  // Calculate total of all medicines
+  const handleQuantityBlur = (id) => {
+    setSelectedMedicines(
+      selectedMedicines.map((med) =>
+        med.id === id
+          ? {
+              ...med,
+              quantity:
+                med.quantity === "" || med.quantity < 1 ? 1 : med.quantity,
+              total:
+                (med.quantity === "" || med.quantity < 1 ? 1 : med.quantity) *
+                med.pricePerTab,
+            }
+          : med,
+      ),
+    );
+  };
+
+  // New function to handle deleting a medicine
+  const handleDelete = (id) => {
+    setSelectedMedicines(selectedMedicines.filter((med) => med.id !== id));
+  };
+
   const totalAmount = selectedMedicines.reduce(
     (sum, medicine) => sum + medicine.total,
-    0
+    0,
   );
 
   return (
     <Paper
-      elevation={5}
+      elevation={0}
       sx={{
-        p: 1.5,
-        flexGrow: 1,
-        borderRadius: 2,
-        background: "linear-gradient(135deg, #F5F7FA, #E3F2FD)",
+        p: { xs: 1.5, sm: 2 },
+        borderRadius: 3,
+        background: "linear-gradient(135deg, #ffffff 0%, #f8fafc 100%)",
+        border: "1px solid #dbeafe",
+        boxShadow: "0 4px 12px rgba(0, 0, 0, 0.03)",
       }}
     >
-      <Typography
-        variant="h6"
-        sx={{ mb: 1, fontWeight: "bold", color: "#1976D2" }}
+      {/* Header */}
+      <Box sx={{ display: "flex", alignItems: "center", mb: 2, gap: 1 }}>
+        <FaCapsules size={18} color="#0369a1" />
+        <Typography
+          variant="subtitle1"
+          sx={{
+            fontWeight: 800,
+            color: "#0c4a6e",
+            letterSpacing: "0.3px",
+          }}
+        >
+          Selected Medicines
+        </Typography>
+        <Chip
+          label={selectedMedicines.length}
+          size="small"
+          sx={{
+            bgcolor: "#0369a1",
+            color: "white",
+            fontWeight: 700,
+            height: "20px",
+          }}
+        />
+      </Box>
+
+      {/* Responsive List Container */}
+      <Stack
+        spacing={1.5}
+        divider={<Divider sx={{ borderColor: "#e2e8f0" }} />}
+        sx={{ mb: 2 }}
       >
-        Selected Medicines
-      </Typography>
-      <Box sx={{ maxHeight: "200px", overflowY: "auto" }}>
-        <Table size="small">
-          <TableHead>
-            <TableRow sx={{ background: "#1976D2" }}>
-              <TableCell sx={{ color: "white", fontWeight: "bold" }}>
-                Name
-              </TableCell>
-              <TableCell sx={{ color: "white", fontWeight: "bold" }}>
-                Brand
-              </TableCell>
-              <TableCell sx={{ color: "white", fontWeight: "bold" }}>
-                Price
-              </TableCell>
-              <TableCell sx={{ color: "white", fontWeight: "bold" }}>
-                Qty
-              </TableCell>
-              <TableCell sx={{ color: "white", fontWeight: "bold" }}>
-                Total
-              </TableCell>
-              <TableCell sx={{ color: "white", fontWeight: "bold" }}>
-                Action
-              </TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {selectedMedicines.map((med) => (
-              <TableRow
-                key={med.id}
+        {selectedMedicines.map((med) => (
+          <Box
+            key={med.id}
+            sx={{
+              display: "flex",
+              flexWrap: "wrap",
+              justifyContent: "space-between",
+              alignItems: "center",
+              gap: 2,
+              p: 1,
+              borderRadius: 2,
+              transition: "background-color 0.2s",
+              "&:hover": { backgroundColor: "#f1f5f9" },
+            }}
+          >
+            {/* Left Side: Name and Brand */}
+            <Box sx={{ flex: "1 1 150px", minWidth: "150px" }}>
+              <Typography
+                sx={{ fontSize: "0.85rem", fontWeight: 700, color: "#0f172a" }}
+              >
+                {med.medicineName}
+              </Typography>
+              <Typography sx={{ fontSize: "0.75rem", color: "#64748b" }}>
+                {med.brand}
+              </Typography>
+            </Box>
+
+            {/* Right Side: Price, Qty, Total, and Delete Button */}
+            <Box
+              sx={{
+                display: "flex",
+                alignItems: "center",
+                gap: { xs: 2, sm: 3 },
+                flexWrap: "wrap",
+              }}
+            >
+              <Typography
                 sx={{
-                  transition: "all 0.3s ease",
-                  "&:hover": { backgroundColor: "#E3F2FD" },
+                  fontSize: "0.8rem",
+                  fontWeight: 600,
+                  color: "#475569",
+                  minWidth: "60px",
                 }}
               >
-                <TableCell>{med.medicineName}</TableCell>
-                <TableCell>{med.brand}</TableCell>
-                <TableCell>NPR {med.pricePerTab.toFixed(2)}</TableCell>
-                <TableCell>
-                  <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                    <IconButton
-                      size="small"
-                      onClick={() => handleQuantityChange(med.id, -1)}
-                      sx={{
-                        color: "#F44336",
-                        "&:hover": {
-                          backgroundColor: "rgba(244, 67, 54, 0.1)",
-                        },
-                      }}
-                    >
-                      <FaMinus size={12} />
-                    </IconButton>
-                    {med.quantity}
-                    <IconButton
-                      size="small"
-                      onClick={() => handleQuantityChange(med.id, 1)}
-                      sx={{
-                        color: "#4CAF50",
-                        "&:hover": {
-                          backgroundColor: "rgba(76, 175, 80, 0.1)",
-                        },
-                      }}
-                    >
-                      <FaPlus size={12} />
-                    </IconButton>
-                  </Box>
-                </TableCell>
-                <TableCell>NPR {med.total.toFixed(2)}</TableCell>
-                <TableCell>
-                  <IconButton
-                    size="small"
-                    onClick={() => handleDeleteMedicine(med.id)}
-                    sx={{
-                      color: "#F44336",
-                      "&:hover": { backgroundColor: "rgba(244, 67, 54, 0.1)" },
-                    }}
-                  >
-                    <FaTrash size={14} />
-                  </IconButton>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-          <TableFooter>
-            <TableRow sx={{ backgroundColor: "#E3F2FD" }}>
-              <TableCell colSpan={4} align="right" sx={{ fontWeight: "bold" }}>
-                Grand Total:
-              </TableCell>
-              <TableCell sx={{ fontWeight: "bold" }}>
-                NPR {totalAmount.toFixed(2)}
-              </TableCell>
-              <TableCell></TableCell>
-            </TableRow>
-          </TableFooter>
-        </Table>
+                ₹{med.pricePerTab.toFixed(2)}
+              </Typography>
+
+              <TextField
+                type="number"
+                value={med.quantity}
+                onChange={(e) => handleQuantityInput(med.id, e.target.value)}
+                onBlur={() => handleQuantityBlur(med.id)}
+                size="small"
+                sx={{
+                  width: "70px",
+                  "& .MuiOutlinedInput-root": {
+                    borderRadius: 1.5,
+                    height: "32px",
+                    backgroundColor: "white",
+                  },
+                  "& input": {
+                    textAlign: "center",
+                    fontWeight: 700,
+                    fontSize: "0.85rem",
+                    "&::-webkit-outer-spin-button, &::-webkit-inner-spin-button":
+                      {
+                        "-webkit-appearance": "none",
+                        margin: 0,
+                      },
+                    "&[type=number]": {
+                      "-moz-appearance": "textfield",
+                    },
+                  },
+                }}
+              />
+
+              <Box sx={{ minWidth: "70px", textAlign: "right" }}>
+                <Typography
+                  sx={{
+                    fontSize: "0.7rem",
+                    color: "#64748b",
+                    textTransform: "uppercase",
+                    fontWeight: 600,
+                    mb: -0.5,
+                  }}
+                >
+                  Total
+                </Typography>
+                <Typography
+                  sx={{
+                    fontSize: "0.95rem",
+                    fontWeight: 800,
+                    color: "#0369a1",
+                  }}
+                >
+                  ₹{med.total.toFixed(2)}
+                </Typography>
+              </Box>
+
+              {/* Delete Action Button */}
+              <IconButton
+                onClick={() => handleDelete(med.id)}
+                color="error"
+                size="small"
+                sx={{
+                  backgroundColor: "#fee2e2",
+                  "&:hover": { backgroundColor: "#fecaca" },
+                }}
+              >
+                <FaTrash size={14} />
+              </IconButton>
+            </Box>
+          </Box>
+        ))}
+      </Stack>
+
+      {/* Footer / Grand Total */}
+      <Box
+        sx={{
+          display: "flex",
+          justifyContent: "flex-end",
+          alignItems: "center",
+          gap: 2,
+          p: 2,
+          bgcolor: "#f0f9ff",
+          borderRadius: 2,
+          border: "1px solid #dbeafe",
+        }}
+      >
+        <Typography
+          sx={{ fontWeight: 800, color: "#0c4a6e", fontSize: "0.9rem" }}
+        >
+          Grand Total:
+        </Typography>
+        <Typography
+          sx={{ fontWeight: 900, fontSize: "1.2rem", color: "#0369a1" }}
+        >
+          ₹{totalAmount.toFixed(2)}
+        </Typography>
       </Box>
     </Paper>
   );

@@ -25,7 +25,7 @@ const Insights = () => {
   const [loading, setLoading] = useState(true);
   const [timeRange, setTimeRange] = useState("today");
   const [specificDate, setSpecificDate] = useState(
-    dayjs().format("YYYY-MM-DD")
+    dayjs().format("YYYY-MM-DD"),
   );
 
   // Fetch receipts from Firestore
@@ -67,31 +67,34 @@ const Insights = () => {
         return receipts.filter(
           (receipt) =>
             receipt.createdAt &&
-            dayjs(receipt.createdAt.toDate()).isSame(dayjs(), "day")
+            dayjs(receipt.createdAt.toDate()).isSame(dayjs(), "day"),
         );
       case "week":
         return receipts.filter(
           (receipt) =>
             receipt.createdAt &&
-            dayjs(receipt.createdAt.toDate()).isSame(dayjs(), "week")
+            dayjs(receipt.createdAt.toDate()).isSame(dayjs(), "week"),
         );
       case "month":
         return receipts.filter(
           (receipt) =>
             receipt.createdAt &&
-            dayjs(receipt.createdAt.toDate()).isSame(dayjs(), "month")
+            dayjs(receipt.createdAt.toDate()).isSame(dayjs(), "month"),
         );
       case "year":
         return receipts.filter(
           (receipt) =>
             receipt.createdAt &&
-            dayjs(receipt.createdAt.toDate()).isSame(dayjs(), "year")
+            dayjs(receipt.createdAt.toDate()).isSame(dayjs(), "year"),
         );
       case "specific":
         return receipts.filter(
           (receipt) =>
             receipt.createdAt &&
-            dayjs(receipt.createdAt.toDate()).isSame(dayjs(specificDate), "day")
+            dayjs(receipt.createdAt.toDate()).isSame(
+              dayjs(specificDate),
+              "day",
+            ),
         );
       default:
         return receipts;
@@ -101,7 +104,7 @@ const Insights = () => {
   // Calculate total earnings for the filtered receipts
   const totalEarnings = filterReceipts().reduce(
     (sum, receipt) => sum + (receipt.totalAmount || 0),
-    0
+    0,
   );
 
   // Get the display label for the time range

@@ -9,18 +9,63 @@ import { onAuthStateChanged } from "firebase/auth";
 import { doc, getDoc } from "firebase/firestore";
 import { auth, db } from "./firebase";
 import { Typography } from "@mui/material";
+
+// Components & Pages
 import Navbar from "./components/Navbar.jsx";
+import Login from "./components/Login.jsx";
 import Home from "./pages/Home.jsx";
 import Stock from "./pages/Stock.jsx";
 import Insights from "./pages/Insights.jsx";
-import Login from "./components/Login.jsx";
 import AdminDashboard from "./pages/AdminDashboard.jsx";
 import StaffDashboard from "./pages/StaffDashboard.jsx";
 import Sales from "./pages/Sales.jsx";
 import PatientRecords from "./pages/PatientRecords.jsx";
-import PatientRegistration from "./pages/PatientRegistration.jsx"; // Import PatientRegistration
+import PatientRegistration from "./pages/PatientRegistration.jsx";
 import LabTests from "./pages/LabTests.jsx";
 import Returns from "./pages/Return.jsx";
+import Consulting from "./pages/Consulting.jsx";
+import ClinicalCharts from "./pages/ClinicalCharts/ClinicalCharts.jsx";
+
+// Import the new components
+
+// ProtectedRoute component for role-based access
+const ProtectedRoute = ({ children, allowedRoles }) => {
+  const [userRole, setUserRole] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        try {
+          const userDocRef = doc(db, "Users", user.uid);
+          const userDoc = await getDoc(userDocRef);
+          if (userDoc.exists()) {
+            setUserRole(userDoc.data().role);
+          }
+        } catch (err) {
+          console.error("Error fetching user role:", err);
+        }
+      }
+      setLoading(false);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  if (loading) {
+    return (
+      <div style={{ textAlign: "center", padding: "20px" }}>
+        <Typography variant="h6">Loading...</Typography>
+      </div>
+    );
+  }
+
+  if (!userRole || !allowedRoles.includes(userRole)) {
+    return <Navigate to="/login" replace />;
+  }
+
+  return children;
+};
+
 function App() {
   const [userRole, setUserRole] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -28,16 +73,14 @@ function App() {
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
-        console.log("User UID:", user.uid); // Debug: Check UID
-        const userDocRef = doc(db, "Users", user.uid);
         try {
+          const userDocRef = doc(db, "Users", user.uid);
           const userDoc = await getDoc(userDocRef);
+
           if (userDoc.exists()) {
-            const role = userDoc.data().role;
-            console.log("Fetched role from Firestore:", role); // Debug: Check role
-            setUserRole(role);
+            setUserRole(userDoc.data().role);
           } else {
-            console.log("User document does not exist in Firestore");
+            console.warn("User document does not exist in Firestore");
             setUserRole(null);
           }
         } catch (err) {
@@ -50,6 +93,7 @@ function App() {
       }
       setLoading(false);
     });
+
     return () => unsubscribe();
   }, []);
 
@@ -65,6 +109,7 @@ function App() {
     <Router>
       {userRole && <Navbar userRole={userRole} />}
       <Routes>
+        {/* Root Route */}
         <Route
           path="/"
           element={
@@ -79,6 +124,8 @@ function App() {
             )
           }
         />
+
+        {/* Login */}
         <Route
           path="/login"
           element={
@@ -91,6 +138,8 @@ function App() {
             )
           }
         />
+
+        {/* Dashboards */}
         <Route
           path="/dashboard"
           element={
@@ -103,33 +152,36 @@ function App() {
             )
           }
         />
+
+        {/* Admin-only routes */}
         <Route
           path="/stock"
           element={userRole === "admin" ? <Stock /> : <Navigate to="/home" />}
         />
         <Route
-          path="/sales"
-          element={userRole ? <Sales /> : <Navigate to="/login" />}
-        />
-        <Route
-          path="/insights"
-          element={userRole ? <Insights /> : <Navigate to="/login" />}
-        />
-        <Route
-          path="/patient-records"
+          path="/consulting"
           element={
-            userRole === "admin" || userRole === "staff" ? (
-              <PatientRecords userRole={userRole} />
+            userRole === "admin" ? (
+              <Consulting userRole={userRole} />
             ) : (
               <Navigate to="/login" />
             )
           }
         />
+
+        {/* Shared routes */}
+
         <Route
-          path="/lab-tests"
+          path="/insights"
+          element={userRole ? <Insights /> : <Navigate to="/login" />}
+        />
+
+        {/* Admin + Staff */}
+        <Route
+          path="/patient-records"
           element={
-            userRole === "admin" || userRole === "lab" ? (
-              <LabTests />
+            ["admin", "staff"].includes(userRole) ? (
+              <PatientRecords userRole={userRole} />
             ) : (
               <Navigate to="/login" />
             )
@@ -138,7 +190,7 @@ function App() {
         <Route
           path="/patient-registration"
           element={
-            userRole === "admin" || userRole === "staff" ? (
+            ["admin", "staff"].includes(userRole) ? (
               <PatientRegistration userRole={userRole} />
             ) : (
               <Navigate to="/login" />
@@ -146,16 +198,42 @@ function App() {
           }
         />
         <Route
-          path="/Returns"
+          path="/clinical-charts"
           element={
-            userRole === "admin" || userRole === "staff" ? (
+            ["admin", "staff"].includes(userRole) ? (
+              <ClinicalCharts userRole={userRole} />
+            ) : (
+              <Navigate to="/login" />
+            )
+          }
+        />
+        <Route
+          path="/returns"
+          element={
+            ["admin", "staff"].includes(userRole) ? (
               <Returns userRole={userRole} />
             ) : (
               <Navigate to="/login" />
             )
           }
         />
+
+        {/* Admin + Lab */}
+        <Route
+          path="/lab-tests"
+          element={
+            ["admin", "lab"].includes(userRole) ? (
+              <LabTests />
+            ) : (
+              <Navigate to="/login" />
+            )
+          }
+        />
+
+        {/* Public */}
         <Route path="/home" element={<Home />} />
+
+        {/* Fallback */}
         <Route
           path="*"
           element={<Typography variant="h6">404 - Page Not Found</Typography>}

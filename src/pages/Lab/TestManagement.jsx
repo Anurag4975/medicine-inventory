@@ -77,8 +77,8 @@ const TestManagement = () => {
         tests.map((test) =>
           test.id === editingTest.id
             ? { ...test, name: editTestName, price: parseFloat(editTestPrice) }
-            : test
-        )
+            : test,
+        ),
       );
       setEditingTest(null);
       setEditTestName("");

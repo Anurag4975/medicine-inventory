@@ -3,233 +3,379 @@ import {
   Paper,
   Typography,
   Box,
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableRow,
   Button,
+  useMediaQuery,
+  useTheme,
 } from "@mui/material";
 import { FaPrint } from "react-icons/fa";
 import { useReactToPrint } from "react-to-print";
 
 const Receipt = ({ receipt }) => {
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
   const receiptRef = useRef();
 
   const handlePrint = useReactToPrint({
     content: () => receiptRef.current,
-    documentTitle: `Receipt_${receipt?.id || "unknown"}`,
-    onBeforePrint: () => console.log("Printing started"),
-    onAfterPrint: () => console.log("Printing finished"),
+    documentTitle: `Receipt_${receipt?.billNumber || "unknown"}`,
+    pageStyle: `
+      @page {
+        size: 80mm auto;
+        margin: 0;
+      }
+      @media print {
+        body {
+          margin: 0;
+          padding: 0;
+        }
+      }
+    `,
   });
-
-  // Debug medicines array
-  console.log("Medicines:", receipt.medicines);
 
   return (
     <Paper
-      elevation={5}
+      elevation={0}
       sx={{
-        p: 1.5,
-        flexGrow: 1,
+        p: { xs: 1.5, sm: 1.5 },
         borderRadius: 2,
-        background: "linear-gradient(135deg, #FFFFFF, #F5F7FA)",
+        background: "linear-gradient(135deg, #ffffff 0%, #f8fafc 100%)",
+        border: "1px solid #dbeafe",
+        boxShadow: "0 1px 6px rgba(0, 0, 0, 0.05)",
         "@media print": {
           background: "none",
           boxShadow: "none",
           padding: 0,
+          border: "none",
         },
       }}
     >
+      {/* Print-optimized receipt (80mm thermal) */}
       <div ref={receiptRef}>
         <Box
           sx={{
-            p: 1,
-            border: "2px solid #1976D2",
-            borderRadius: 2,
-            maxHeight: "300px",
-            overflowY: "auto",
+            maxWidth: "80mm",
+            margin: "0 auto",
+            fontFamily: "'Courier New', monospace",
+            fontSize: "11px",
+            lineHeight: "1.3",
+            color: "#000",
+            bgcolor: "#fff",
+            p: 1.5,
             "@media print": {
-              maxHeight: "none",
-              overflowY: "visible",
-              border: "1px solid #000",
+              maxWidth: "100%",
+              padding: "6px",
+              fontSize: "10px",
             },
           }}
         >
-          <Typography
-            variant="h6"
-            align="center"
-            sx={{ fontWeight: "bold", color: "#1976D2" }}
-          >
-            SADEV MEDICAL HALL
-          </Typography>
-          <Typography
-            align="center"
-            sx={{ color: "#455A64", fontSize: "0.9rem" }}
-          >
-            Birgunj-13, Parsa
-          </Typography>
-          <Typography
-            align="center"
-            sx={{ color: "#455A64", fontSize: "0.9rem" }}
-          >
-            Pan no: 108956245
-          </Typography>
-          <Typography
-            variant="h6"
-            align="center"
-            sx={{ mt: 1, fontWeight: "bold", color: "#1976D2" }}
-          >
-            Receipt
-          </Typography>
-          <Typography sx={{ fontSize: "0.9rem" }}>
-            Bill Number: {receipt.billNumber}
-          </Typography>
-          <Typography sx={{ fontSize: "0.9rem" }}>
-            Patient: {receipt.patient.name}
-          </Typography>
-          <Typography sx={{ fontSize: "0.9rem" }}>
-            Age: {receipt.patient.age}
-          </Typography>
-          <Typography sx={{ fontSize: "0.9rem" }}>
-            Gender: {receipt.patient.gender}
-          </Typography>
-          {receipt.patient.address && (
-            <Typography sx={{ fontSize: "0.9rem" }}>
-              Address: {receipt.patient.address}
-            </Typography>
-          )}
-          <Table
-            size="small"
+          {/* Header */}
+          <Box
             sx={{
-              mt: 1,
-              "@media print": {
-                pageBreakInside: "auto",
-                "& tr": {
-                  pageBreakInside: "avoid",
-                  pageBreakAfter: "auto",
-                },
-              },
+              textAlign: "center",
+              mb: 1,
+              pb: 0.75,
+              borderBottom: "2px dashed #000",
             }}
           >
-            <TableHead>
-              <TableRow sx={{ background: "#1976D2" }}>
-                <TableCell
+            <Typography
+              sx={{
+                fontSize: "14px",
+                fontWeight: "bold",
+                letterSpacing: "0.5px",
+                mb: 0.3,
+                "@media print": { fontSize: "13px" },
+              }}
+            >
+              SADEV MEDICAL HALL
+            </Typography>
+            <Typography
+              sx={{ fontSize: "10px", "@media print": { fontSize: "9px" } }}
+            >
+              Birgunj-13, Parsa
+            </Typography>
+            <Typography
+              sx={{ fontSize: "10px", "@media print": { fontSize: "9px" } }}
+            >
+              PAN: 108956245
+            </Typography>
+          </Box>
+
+          {/* Bill Info */}
+          <Box sx={{ mb: 1 }}>
+            <Typography
+              sx={{
+                fontWeight: "bold",
+                fontSize: "11px",
+                mb: 0.3,
+                textAlign: "center",
+              }}
+            >
+              CASH RECEIPT
+            </Typography>
+            <Box
+              sx={{
+                display: "flex",
+                justifyContent: "space-between",
+                fontSize: "10px",
+              }}
+            >
+              <span>Bill:</span>
+              <span style={{ fontWeight: "bold" }}>{receipt.billNumber}</span>
+            </Box>
+            <Box
+              sx={{
+                display: "flex",
+                justifyContent: "space-between",
+                fontSize: "10px",
+              }}
+            >
+              <span>Date:</span>
+              <span>
+                {new Date(receipt.saleDate).toLocaleString("en-US", {
+                  year: "numeric",
+                  month: "2-digit",
+                  day: "2-digit",
+                  hour: "2-digit",
+                  minute: "2-digit",
+                  hour12: true,
+                })}
+              </span>
+            </Box>
+          </Box>
+
+          {/* Patient */}
+          <Box sx={{ mb: 1, pb: 0.75, borderBottom: "1px dashed #000" }}>
+            <Box
+              sx={{
+                display: "flex",
+                justifyContent: "space-between",
+                fontSize: "10px",
+              }}
+            >
+              <span>Patient:</span>
+              <span style={{ fontWeight: "bold" }}>{receipt.patient.name}</span>
+            </Box>
+            {receipt.patient.age && (
+              <Box
+                sx={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  fontSize: "10px",
+                }}
+              >
+                <span>Age/Gender:</span>
+                <span>
+                  {receipt.patient.age}Y / {receipt.patient.gender}
+                </span>
+              </Box>
+            )}
+            {receipt.patient.phone && (
+              <Box
+                sx={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  fontSize: "10px",
+                }}
+              >
+                <span>Phone:</span>
+                <span>{receipt.patient.phone}</span>
+              </Box>
+            )}
+          </Box>
+
+          {/* Items Header */}
+          <Box
+            sx={{
+              display: "grid",
+              gridTemplateColumns: "3fr 1fr 1fr 1fr",
+              gap: 0.3,
+              fontSize: "9px",
+              fontWeight: "bold",
+              pb: 0.3,
+              borderBottom: "1px solid #000",
+              mb: 0.3,
+            }}
+          >
+            <span>ITEM</span>
+            <span style={{ textAlign: "right" }}>RATE</span>
+            <span style={{ textAlign: "right" }}>QTY</span>
+            <span style={{ textAlign: "right" }}>AMT</span>
+          </Box>
+
+          {/* Items */}
+          <Box sx={{ mb: 0.75 }}>
+            {receipt.medicines.map((med, index) => (
+              <Box key={index} sx={{ mb: 0.3 }}>
+                <Box sx={{ fontSize: "10px", fontWeight: "bold" }}>
+                  {med.medicineName}
+                </Box>
+                <Box
                   sx={{
-                    color: "white",
-                    fontWeight: "bold",
-                    fontSize: "0.8rem",
+                    display: "grid",
+                    gridTemplateColumns: "3fr 1fr 1fr 1fr",
+                    gap: 0.3,
+                    fontSize: "9px",
+                    color: "#333",
                   }}
                 >
-                  Medicine
-                </TableCell>
-                <TableCell
+                  <span style={{ fontSize: "8px" }}>({med.brand})</span>
+                  <span style={{ textAlign: "right" }}>
+                    {med.pricePerTab.toFixed(2)}
+                  </span>
+                  <span style={{ textAlign: "right" }}>{med.quantity}</span>
+                  <span style={{ textAlign: "right", fontWeight: "bold" }}>
+                    {med.total.toFixed(2)}
+                  </span>
+                </Box>
+              </Box>
+            ))}
+          </Box>
+
+          {/* Totals */}
+          <Box sx={{ borderTop: "1px solid #000", pt: 0.3, mb: 0.3 }}>
+            <Box
+              sx={{
+                display: "flex",
+                justifyContent: "space-between",
+                fontSize: "10px",
+              }}
+            >
+              <span>Subtotal:</span>
+              <span>
+                NPR {(receipt.totalAmount + receipt.discount).toFixed(2)}
+              </span>
+            </Box>
+            {receipt.discount > 0 && (
+              <Box
+                sx={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  fontSize: "10px",
+                }}
+              >
+                <span>Discount:</span>
+                <span>- NPR {receipt.discount.toFixed(2)}</span>
+              </Box>
+            )}
+            <Box
+              sx={{
+                display: "flex",
+                justifyContent: "space-between",
+                fontSize: "11px",
+                fontWeight: "bold",
+                mt: 0.3,
+                pt: 0.3,
+                borderTop: "2px solid #000",
+              }}
+            >
+              <span>TOTAL:</span>
+              <span>NPR {receipt.totalAmount.toFixed(2)}</span>
+            </Box>
+          </Box>
+
+          {/* Payment */}
+          <Box
+            sx={{
+              mb: 1,
+              fontSize: "9px",
+              borderTop: "1px dashed #000",
+              pt: 0.3,
+            }}
+          >
+            <Box sx={{ display: "flex", justifyContent: "space-between" }}>
+              <span>Payment:</span>
+              <span style={{ fontWeight: "bold" }}>
+                {receipt.paymentType === "fullyPaid"
+                  ? "PAID"
+                  : receipt.paymentType === "partiallyPaid"
+                  ? "PARTIAL"
+                  : "CREDIT"}
+              </span>
+            </Box>
+            <Box sx={{ display: "flex", justifyContent: "space-between" }}>
+              <span>Method:</span>
+              <span>
+                {receipt.paymentMethod === "Online" ? "DIGITAL" : "CASH"}
+              </span>
+            </Box>
+            {receipt.paymentType === "partiallyPaid" && (
+              <>
+                <Box
                   sx={{
-                    color: "white",
-                    fontWeight: "bold",
-                    fontSize: "0.8rem",
+                    display: "flex",
+                    justifyContent: "space-between",
+                    mt: 0.2,
                   }}
                 >
-                  Brand
-                </TableCell>
-                <TableCell
+                  <span>Paid:</span>
+                  <span>NPR {receipt.paidAmount.toFixed(2)}</span>
+                </Box>
+                <Box
                   sx={{
-                    color: "white",
+                    display: "flex",
+                    justifyContent: "space-between",
                     fontWeight: "bold",
-                    fontSize: "0.8rem",
+                    color: "#dc2626",
                   }}
                 >
-                  Price/Tab
-                </TableCell>
-                <TableCell
-                  sx={{
-                    color: "white",
-                    fontWeight: "bold",
-                    fontSize: "0.8rem",
-                  }}
-                >
-                  Qty
-                </TableCell>
-                <TableCell
-                  sx={{
-                    color: "white",
-                    fontWeight: "bold",
-                    fontSize: "0.8rem",
-                  }}
-                >
-                  Total
-                </TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {receipt.medicines.map((med, index) => (
-                <TableRow key={index}>
-                  <TableCell sx={{ fontSize: "0.8rem" }}>
-                    {med.medicineName}
-                  </TableCell>
-                  <TableCell sx={{ fontSize: "0.8rem" }}>{med.brand}</TableCell>
-                  <TableCell sx={{ fontSize: "0.8rem" }}>
-                    NPR {med.pricePerTab.toFixed(2)}
-                  </TableCell>
-                  <TableCell sx={{ fontSize: "0.8rem" }}>
-                    {med.quantity}
-                  </TableCell>
-                  <TableCell sx={{ fontSize: "0.8rem" }}>
-                    NPR {med.total.toFixed(2)}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-          <Typography sx={{ mt: 1, fontSize: "0.9rem" }}>
-            Discount: NPR {receipt.discount.toFixed(2)}
-          </Typography>
-          <Typography sx={{ fontSize: "0.9rem" }}>
-            Payment Type:{" "}
-            {receipt.paymentType === "fullyPaid"
-              ? "Fully Paid"
-              : receipt.paymentType === "partiallyPaid"
-              ? "Partially Paid"
-              : "Credit"}
-          </Typography>
-          <Typography sx={{ fontSize: "0.9rem" }}>
-            Payment Method: {receipt.paymentMethod || "Offline"}
-          </Typography>
-          {receipt.paymentType === "partiallyPaid" && (
-            <>
-              <Typography sx={{ fontSize: "0.9rem" }}>
-                Paid Amount: NPR {receipt.paidAmount.toFixed(2)}
-              </Typography>
-              <Typography sx={{ fontSize: "0.9rem" }}>
-                Credit Amount: NPR {receipt.creditAmount.toFixed(2)}
-              </Typography>
-            </>
-          )}
-          <Typography sx={{ mt: 1, fontWeight: "bold", fontSize: "1rem" }}>
-            Total Amount: NPR {receipt.totalAmount.toFixed(2)}
-          </Typography>
-          <Typography sx={{ fontSize: "0.9rem" }}>
-            Sale Date: {new Date(receipt.saleDate).toLocaleString()}
-          </Typography>
+                  <span>Due:</span>
+                  <span>NPR {receipt.creditAmount.toFixed(2)}</span>
+                </Box>
+              </>
+            )}
+          </Box>
+
+          {/* Footer */}
+          <Box
+            sx={{
+              textAlign: "center",
+              fontSize: "9px",
+              pt: 0.75,
+              borderTop: "2px dashed #000",
+            }}
+          >
+            <Typography sx={{ fontSize: "9px", mb: 0.3 }}>
+              Thank you for your visit!
+            </Typography>
+            <Typography sx={{ fontSize: "8px", fontStyle: "italic" }}>
+              Check medicines before leaving
+            </Typography>
+            <Typography sx={{ fontSize: "8px", mt: 0.3 }}>
+              No exchange/refund
+            </Typography>
+          </Box>
         </Box>
       </div>
+
+      {/* Print Button */}
       <Button
-        variant="outlined"
+        variant="contained"
         onClick={handlePrint}
+        fullWidth
+        size="small"
         sx={{
           mt: 1,
-          mx: "auto",
-          display: "block",
-          color: "#1976D2",
-          borderColor: "#1976D2",
-          "&:hover": { borderColor: "#115293", color: "#115293" },
-          transition: "all 0.3s ease",
+          bgcolor: "#0369a1",
+          "&:hover": {
+            bgcolor: "#0c4a6e",
+            transform: "translateY(-1px)",
+            boxShadow: "0 4px 12px rgba(3, 105, 161, 0.3)",
+          },
+          transition: "all 0.15s ease",
+          borderRadius: 1.5,
+          py: 0.75,
+          fontWeight: 700,
+          fontSize: "0.8rem",
+          textTransform: "none",
+          letterSpacing: "0.2px",
+          boxShadow: "0 2px 8px rgba(3, 105, 161, 0.2)",
           "@media print": {
             display: "none",
           },
         }}
       >
-        <FaPrint style={{ marginRight: "5px" }} /> Print Receipt
+        <FaPrint style={{ marginRight: "6px", fontSize: "0.75rem" }} /> Print
+        Receipt
       </Button>
     </Paper>
   );

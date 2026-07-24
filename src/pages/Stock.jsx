@@ -25,8 +25,6 @@ function Stock() {
   const [showNearExpiry, setShowNearExpiry] = useState(false);
   const [nearExpiryStocks, setNearExpiryStocks] = useState([]);
 
-  const currentDate = new Date("2025-04-02"); // Current date as per your setup
-
   const toDateSafe = (value) => {
     if (value && typeof value.toDate === "function") return value.toDate();
     else if (value instanceof Date) return value;
@@ -59,32 +57,22 @@ function Stock() {
     fetchStocks();
   }, []);
 
-  const fetchNearExpiryStocks = async () => {
-    try {
-      const stockSnapshot = await getDocs(collection(db, "Stock"));
-      const stockList = stockSnapshot.docs.map((doc) => {
-        const data = doc.data();
-        return {
-          id: doc.id,
-          ...data,
-          expiryDate: toDateSafe(data.expiryDate),
-        };
-      });
-      const threeMonthsFromNow = new Date(currentDate);
-      threeMonthsFromNow.setMonth(threeMonthsFromNow.getMonth() + 3);
-      const nearExpiry = stockList
-        .filter(
-          (stock) =>
-            stock.expiryDate &&
-            stock.expiryDate >= currentDate &&
-            stock.expiryDate <= threeMonthsFromNow
-        )
-        .sort((a, b) => a.expiryDate - b.expiryDate); // Sort by expiry date (nearest to farthest)
-      setNearExpiryStocks(nearExpiry);
-      setShowNearExpiry(true);
-    } catch (error) {
-      console.error("Error fetching near-expiry stocks:", error);
-    }
+  const fetchNearExpiryStocks = () => {
+    // Stocks are already loaded in state - no need to hit Firestore again,
+    // just derive the near-expiry subset locally.
+    const currentDate = new Date();
+    const threeMonthsFromNow = new Date(currentDate);
+    threeMonthsFromNow.setMonth(threeMonthsFromNow.getMonth() + 3);
+    const nearExpiry = stocks
+      .filter(
+        (stock) =>
+          stock.expiryDate &&
+          stock.expiryDate >= currentDate &&
+          stock.expiryDate <= threeMonthsFromNow,
+      )
+      .sort((a, b) => a.expiryDate - b.expiryDate); // Sort by expiry date (nearest to farthest)
+    setNearExpiryStocks(nearExpiry);
+    setShowNearExpiry(true);
   };
 
   return (
