@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React from "react";
 import {
   Box,
   Typography,
@@ -9,8 +9,6 @@ import {
   TableCell,
   TableRow,
 } from "@mui/material";
-import { doc, getDoc } from "firebase/firestore";
-import { db } from "../firebase";
 import moment from "moment";
 
 const logo = "../../doc.png";
@@ -32,18 +30,12 @@ const OPDTicket = React.forwardRef(
       onExamination,
       medicalAdvice,
       testResults = {},
+      doctor, // <--- Accept the doctor prop passed from PatientRecords
     },
     ref,
   ) => {
-    const [doctor, setDoctor] = useState(null);
-    useEffect(() => {
-      if (!patient?.doctorId) return;
-      const fetchDoctor = async () => {
-        const snap = await getDoc(doc(db, "Doctors", patient.doctorId));
-        if (snap.exists()) setDoctor(snap.data());
-      };
-      fetchDoctor();
-    }, [patient?.doctorId]);
+    // REMOVED the asynchronous useEffect fetch.
+    // react-to-print needs the DOM to be ready synchronously.
 
     if (!patient || !doctor) return null;
 

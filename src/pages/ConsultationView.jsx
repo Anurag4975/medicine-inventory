@@ -21,14 +21,15 @@ import {
   TableBody,
   TableCell,
   TableRow,
+  CircularProgress,
 } from "@mui/material";
 import {
   doc,
-  updateDoc,
   setDoc,
   serverTimestamp,
   collection,
   arrayUnion,
+  writeBatch,
 } from "firebase/firestore";
 import { db } from "../firebase";
 import {
@@ -54,6 +55,36 @@ const medicineTypes = [
   "Other",
 ];
 
+// Simple cache helper
+const clearPatientCache = (patientId) => {
+  try {
+    sessionStorage.removeItem(`patient_${patientId}`);
+    sessionStorage.removeItem("stockData");
+  } catch (e) {
+    // Ignore cache errors
+  }
+};
+
+const saveToLocalQueue = (data) => {
+  try {
+    const pendingConsultations = JSON.parse(
+      localStorage.getItem("pending_consultations") || "[]",
+    );
+    pendingConsultations.push({
+      ...data,
+      timestamp: new Date().toISOString(),
+    });
+    localStorage.setItem(
+      "pending_consultations",
+      JSON.stringify(pendingConsultations),
+    );
+    return true;
+  } catch (e) {
+    console.error("Failed to save to local queue:", e);
+    return false;
+  }
+};
+
 const ConsultationView = ({
   patient,
   availableTests,
@@ -61,14 +92,14 @@ const ConsultationView = ({
   onCancel,
   onSave,
   userRole,
+  doctors = {},
 }) => {
-  // If the status is "waiting", this is a brand new visit. Ignore old database arrays to prevent duplication.
   const isNewVisit = patient.status === "waiting";
 
+  // State
   const [diagnosis, setDiagnosis] = useState(
     isNewVisit ? "" : patient.diagnoses?.[0]?.text || "",
   );
-
   const [selectedTests, setSelectedTests] = useState(
     isNewVisit
       ? []
@@ -77,14 +108,12 @@ const ConsultationView = ({
             availableTests.find((t) => t.name === test) || { name: test },
         ) || [],
   );
-
   const [prescription, setPrescription] = useState(
     !isNewVisit && patient.prescription?.length > 0
       ? patient.prescription
       : [{ medicineId: "", medicine: "", type: "", note: "", stock: 0 }],
   );
-
-  const [knownCaseOf, setKnownCaseOf] = useState(patient.knownCaseOf || ""); // Chronic info persists across all visits
+  const [knownCaseOf, setKnownCaseOf] = useState(patient.knownCaseOf || "");
   const [chiefComplaints, setChiefComplaints] = useState(
     isNewVisit ? "" : patient.chiefComplaints || "",
   );
@@ -94,23 +123,213 @@ const ConsultationView = ({
   const [medicalAdvice, setMedicalAdvice] = useState(
     isNewVisit ? "" : patient.medicalAdvice || "",
   );
-
   const [currentTestResults, setCurrentTestResults] = useState(
     isNewVisit ? {} : patient.testResults || {},
   );
   const [testResultsDialogOpen, setTestResultsDialogOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [showTicket, setShowTicket] = useState(false);
+  const [savingMessage, setSavingMessage] = useState("");
 
   const ticketRef = useRef();
-
-  useEffect(() => {
-    setCurrentTestResults(isNewVisit ? {} : patient.testResults || {});
-  }, [patient.testResults, isNewVisit]);
+  const typeRefs = useRef([]); // Refs for Type Select fields
 
   const finalPrescription = prescription.filter(
     (p) => p.medicine && p.note && p.type,
   );
-  const handlePrint = useReactToPrint({ content: () => ticketRef.current });
+  const doctorData = doctors[patient.doctorId];
+
+  // Print handler
+  const handlePrint = useReactToPrint({
+    content: () => ticketRef.current,
+    documentTitle: `OPD_Ticket_${patient.name}_${patient.billNo}`,
+    onAfterPrint: () => {
+      console.log("Print completed");
+      setShowTicket(false);
+    },
+  });
+
+  // Trigger print when showTicket becomes true
+  useEffect(() => {
+    if (showTicket && doctorData && ticketRef.current) {
+      const timer = setTimeout(() => {
+        handlePrint();
+        setTimeout(() => {
+          onSave();
+        }, 1500);
+      }, 500);
+      return () => clearTimeout(timer);
+    }
+  }, [showTicket, doctorData]);
+
+  // ---------------------------------------------------------------------------
+  // OPTIMIZED: Single batch write for all operations
+  // ---------------------------------------------------------------------------
+  const saveConsultation = async (complete = false) => {
+    if (!diagnosis.trim()) {
+      alert("Please enter a diagnosis before saving.");
+      return;
+    }
+
+    if (complete) {
+      const testsWithoutResults = selectedTests.filter(
+        (test) => !currentTestResults[test.name]?.trim(),
+      );
+      if (testsWithoutResults.length > 0) {
+        alert(
+          `Please enter results for: ${testsWithoutResults.map((t) => t.name).join(", ")}`,
+        );
+        return;
+      }
+      if (
+        !window.confirm(
+          "Mark consultation as completed? This cannot be undone.",
+        )
+      )
+        return;
+    }
+
+    setIsSaving(true);
+    setSavingMessage(
+      complete ? "Completing consultation..." : "Saving draft...",
+    );
+
+    try {
+      const batch = writeBatch(db);
+      const patientRef = doc(db, "Patients", patient.id);
+
+      let newStatus = "in-progress";
+      if (complete) {
+        newStatus = "completed";
+      } else if (selectedTests.length > 0) {
+        const allResultsPresent = selectedTests.every((test) =>
+          currentTestResults[test.name]?.trim(),
+        );
+        newStatus = allResultsPresent
+          ? "test-completed"
+          : "waiting-for-results";
+      }
+
+      const patientUpdate = {
+        knownCaseOf,
+        chiefComplaints: complete ? "" : chiefComplaints,
+        onExamination: complete ? "" : onExamination,
+        medicalAdvice: complete ? "" : medicalAdvice,
+        diagnoses: [
+          { text: diagnosis, date: new Date().toISOString(), doctor: userRole },
+        ],
+        prescribedTests: selectedTests.map((test) => test.name),
+        prescription: finalPrescription,
+        testResults: currentTestResults,
+        status: newStatus,
+        consultationStatus: complete ? "completed" : "in-progress",
+        updatedAt: new Date().toISOString(),
+      };
+
+      if (complete) {
+        patientUpdate.pastVisits = arrayUnion({
+          date: new Date().toISOString(),
+          doctor: userRole,
+          diagnosis,
+          chiefComplaints,
+          onExamination,
+          medicalAdvice,
+          prescribedTests: selectedTests.map((test) => test.name),
+          prescription: finalPrescription,
+          testResults: currentTestResults,
+        });
+        patientUpdate.prescribedTests = [];
+        patientUpdate.prescription = [];
+        patientUpdate.testResults = {};
+        patientUpdate.currentLabOrderId = null;
+      }
+
+      if (selectedTests.length > 0) {
+        let orderId = patient.currentLabOrderId;
+        const isNewOrder = !orderId;
+
+        if (isNewOrder) {
+          orderId = doc(collection(db, "labOrders")).id;
+        }
+
+        const labOrderRef = doc(db, "labOrders", orderId);
+        const orderData = {
+          patientId: patient.id,
+          patientName: patient.name,
+          patientPhone: patient.phone || "",
+          patientAge: patient.age || "",
+          patientGender: patient.gender || "",
+          doctorName: userRole,
+          tests: selectedTests.map((test) => ({
+            testId: test.id || null,
+            name: test.name,
+            price: test.price != null ? test.price : null,
+            resultFormat: test.resultFormat || null,
+            result: currentTestResults[test.name] || null,
+          })),
+          updatedAt: serverTimestamp(),
+        };
+
+        if (isNewOrder) {
+          orderData.orderStatus = "pending-billing";
+          orderData.createdAt = serverTimestamp();
+        }
+
+        batch.set(labOrderRef, orderData, { merge: true });
+
+        if (isNewOrder) {
+          patientUpdate.currentLabOrderId = orderId;
+        }
+      }
+
+      batch.update(patientRef, patientUpdate);
+      await batch.commit();
+      clearPatientCache(patient.id);
+
+      if (complete) {
+        if (doctorData) {
+          setShowTicket(true);
+        } else {
+          alert("Consultation completed successfully!");
+          onSave();
+        }
+      } else {
+        alert("Consultation draft saved successfully!");
+        onSave();
+      }
+    } catch (error) {
+      console.error("Save error:", error);
+
+      const saved = saveToLocalQueue({
+        patientId: patient.id,
+        diagnosis,
+        selectedTests: selectedTests.map((t) => t.name),
+        prescription: finalPrescription,
+        knownCaseOf,
+        chiefComplaints,
+        onExamination,
+        medicalAdvice,
+        testResults: currentTestResults,
+        complete,
+        userRole,
+      });
+
+      if (saved) {
+        alert(
+          "Network error! Consultation saved locally. Will sync when connection is restored.",
+        );
+        onSave();
+      } else {
+        alert("Failed to save: " + error.message);
+      }
+    } finally {
+      setIsSaving(false);
+      setSavingMessage("");
+    }
+  };
+
+  const handleSaveDraft = () => saveConsultation(false);
+  const handleCompleteConsultation = () => saveConsultation(true);
 
   const handleAddPrescriptionRow = () => {
     setPrescription([
@@ -133,171 +352,61 @@ const ConsultationView = ({
     setPrescription(list);
   };
 
-  const syncLabOrder = async (resultsSnapshot) => {
-    if (selectedTests.length === 0) return null;
-
-    // Use DB-backed ID to ensure we never duplicate the order upon re-renders
-    let orderId = patient.currentLabOrderId;
-    let isNewOrder = !orderId;
-
-    if (isNewOrder) {
-      orderId = doc(collection(db, "labOrders")).id;
-    }
-
-    const testsWithoutResults = selectedTests.filter(
-      (test) => !resultsSnapshot[test.name]?.trim(),
-    );
-
-    const orderData = {
-      patientId: patient.id,
-      patientName: patient.name,
-      patientPhone: patient.phone || "",
-      patientAge: patient.age || "",
-      patientGender: patient.gender || "",
-      doctorName: userRole,
-      tests: selectedTests.map((test) => ({
-        testId: test.id || null,
-        name: test.name,
-        price: test.price != null ? test.price : null,
-        resultFormat: test.resultFormat || null,
-        result: resultsSnapshot[test.name] || null,
-      })),
-      updatedAt: serverTimestamp(),
-    };
-
-    // Only a brand-new order gets queued for billing here. An order that's
-    // already "billed" or "results-done" is NOT reset back to
-    // "pending-billing" just because the doctor re-saved the draft —
-    // otherwise a paid order would silently bounce back to the cashier
-    // queue every time the doctor touches the consultation.
-    //
-    // KNOWN LIMITATION: if the doctor adds a *new* test to an order that's
-    // already billed, that new test won't get its own billing prompt
-    // automatically. For now, treat "adding tests mid-visit after billing"
-    // as a separate manual step (re-prescribe as a fresh order, or handle
-    // it in Sales.jsx as an add-on charge) rather than silently reopening
-    // the whole order's status.
-    if (isNewOrder) {
-      orderData.orderStatus = "pending-billing";
-    }
-
-    if (isNewOrder) orderData.createdAt = serverTimestamp();
-
-    await setDoc(doc(db, "labOrders", orderId), orderData, { merge: true });
-    return orderId;
-  };
-
-  const handleSaveDraft = async () => {
-    if (!diagnosis.trim())
-      return alert("Please enter a diagnosis before saving.");
-    setIsSaving(true);
-    try {
-      const patientRef = doc(db, "Patients", patient.id);
-      let newStatus = "in-progress";
-
-      if (selectedTests.length > 0) {
-        const allResultsPresent = selectedTests.every((test) =>
-          currentTestResults[test.name]?.trim(),
-        );
-        newStatus = allResultsPresent
-          ? "test-completed"
-          : "waiting-for-results";
+  // Handle Enter key in note field - add new row and focus on Type
+  const handleNoteKeyDown = (e, index) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      const currentItem = prescription[index];
+      if (currentItem.medicine && currentItem.note && currentItem.type) {
+        handleAddPrescriptionRow();
+        // Focus on the Type select of the new row after render
+        setTimeout(() => {
+          const newIndex = prescription.length;
+          if (typeRefs.current[newIndex]) {
+            typeRefs.current[newIndex].focus();
+          }
+        }, 100);
       }
-
-      // Sync Lab Order first to get the ID
-      const activeLabOrderId = await syncLabOrder(currentTestResults);
-
-      await updateDoc(patientRef, {
-        knownCaseOf,
-        chiefComplaints,
-        onExamination,
-        medicalAdvice,
-        diagnoses: [
-          { text: diagnosis, date: new Date().toISOString(), doctor: userRole },
-        ],
-        prescribedTests: selectedTests.map((test) => test.name),
-        prescription: finalPrescription,
-        testResults: currentTestResults,
-        status: newStatus,
-        currentLabOrderId: activeLabOrderId || null, // Lock the order to this patient visit
-        updatedAt: new Date().toISOString(),
-      });
-
-      alert("Consultation draft saved successfully!");
-      onSave();
-    } catch (error) {
-      alert("Failed to save draft: " + error.message);
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  const handleCompleteConsultation = async () => {
-    if (!diagnosis.trim())
-      return alert("Please enter a diagnosis before completing.");
-    const testsWithoutResults = selectedTests.filter(
-      (test) => !currentTestResults[test.name]?.trim(),
-    );
-
-    if (testsWithoutResults.length > 0) {
-      return alert(
-        `Please enter results for: ${testsWithoutResults.map((t) => t.name).join(", ")}`,
-      );
-    }
-
-    if (
-      !window.confirm("Mark consultation as completed? This cannot be undone.")
-    )
-      return;
-    setIsSaving(true);
-    try {
-      const patientRef = doc(db, "Patients", patient.id);
-
-      // Update the final lab order status one last time
-      await syncLabOrder(currentTestResults);
-
-      // Package the current visit data to save into history
-      const currentVisitHistory = {
-        date: new Date().toISOString(),
-        doctor: userRole,
-        diagnosis,
-        chiefComplaints,
-        onExamination,
-        medicalAdvice,
-        prescribedTests: selectedTests.map((test) => test.name),
-        prescription: finalPrescription,
-        testResults: currentTestResults,
-      };
-
-      await updateDoc(patientRef, {
-        knownCaseOf, // Retain chronic conditions
-        status: "completed",
-        consultationStatus: "completed",
-        updatedAt: new Date().toISOString(),
-        pastVisits: arrayUnion(currentVisitHistory), // Push to history
-
-        // WIPE active session data so the next visit starts entirely clean
-        chiefComplaints: "",
-        onExamination: "",
-        medicalAdvice: "",
-        prescribedTests: [],
-        prescription: [],
-        testResults: {},
-        currentLabOrderId: null,
-      });
-
-      alert("Consultation completed and saved!");
-      handlePrint();
-      onSave();
-    } catch (error) {
-      alert("Failed to save: " + error.message);
-    } finally {
-      setIsSaving(false);
     }
   };
 
   return (
     <Paper sx={{ p: 3, m: 2 }}>
+      {/* Saving overlay */}
+      {isSaving && (
+        <Box
+          sx={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            bgcolor: "rgba(0,0,0,0.3)",
+            zIndex: 9999,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            flexDirection: "column",
+            gap: 2,
+          }}
+        >
+          <CircularProgress size={60} sx={{ color: "#fff" }} />
+          <Typography
+            variant="h6"
+            sx={{
+              color: "#fff",
+              bgcolor: "rgba(0,0,0,0.5)",
+              px: 3,
+              py: 1,
+              borderRadius: 2,
+            }}
+          >
+            {savingMessage}
+          </Typography>
+        </Box>
+      )}
+
+      {/* Header */}
       <Box
         sx={{
           display: "flex",
@@ -322,7 +431,13 @@ const ConsultationView = ({
           <Button
             variant="outlined"
             startIcon={<PrintIcon />}
-            onClick={handlePrint}
+            onClick={() => {
+              if (doctorData) {
+                setShowTicket(true);
+              } else {
+                alert("Doctor information not found. Cannot print ticket.");
+              }
+            }}
             disabled={!diagnosis || finalPrescription.length === 0}
           >
             Print OPD Ticket
@@ -330,7 +445,9 @@ const ConsultationView = ({
         </Box>
       </Box>
 
+      {/* Form Fields */}
       <Grid container spacing={3}>
+        {/* K/C/O */}
         <Grid item xs={12}>
           <Typography variant="h6" gutterBottom>
             Known Case Of (K/C/O)
@@ -341,8 +458,11 @@ const ConsultationView = ({
             rows={2}
             value={knownCaseOf}
             onChange={(e) => setKnownCaseOf(e.target.value)}
+            placeholder="e.g., HTN, DM, Asthma..."
           />
         </Grid>
+
+        {/* Chief Complaints */}
         <Grid item xs={12}>
           <Typography variant="h6" gutterBottom>
             Chief Complaints (C/C)
@@ -353,8 +473,11 @@ const ConsultationView = ({
             rows={3}
             value={chiefComplaints}
             onChange={(e) => setChiefComplaints(e.target.value)}
+            placeholder="Describe patient's main complaints..."
           />
         </Grid>
+
+        {/* On Examination */}
         <Grid item xs={12}>
           <Typography variant="h6" gutterBottom>
             On Examination
@@ -365,8 +488,11 @@ const ConsultationView = ({
             rows={3}
             value={onExamination}
             onChange={(e) => setOnExamination(e.target.value)}
+            placeholder="Physical examination findings..."
           />
         </Grid>
+
+        {/* Diagnosis */}
         <Grid item xs={12}>
           <Typography variant="h6" gutterBottom>
             Diagnosis
@@ -377,8 +503,12 @@ const ConsultationView = ({
             rows={4}
             value={diagnosis}
             onChange={(e) => setDiagnosis(e.target.value)}
+            placeholder="Enter diagnosis..."
+            required
           />
         </Grid>
+
+        {/* Lab Tests */}
         <Grid item xs={12}>
           <Typography variant="h6" gutterBottom>
             Prescribe Lab Tests
@@ -402,14 +532,6 @@ const ConsultationView = ({
                   <TableRow key={test.name}>
                     <TableCell sx={{ fontWeight: "bold" }}>
                       {test.name}
-                      {patient.testLocations?.[test.name] === "sent-out" && (
-                        <Chip
-                          label="Sent-Out (External)"
-                          size="small"
-                          color="warning"
-                          sx={{ ml: 1, fontSize: "0.7rem" }}
-                        />
-                      )}
                     </TableCell>
                     <TableCell>
                       {currentTestResults[test.name] ? (
@@ -427,6 +549,7 @@ const ConsultationView = ({
           )}
         </Grid>
 
+        {/* Prescription */}
         <Grid item xs={12}>
           <Box
             sx={{
@@ -436,7 +559,9 @@ const ConsultationView = ({
               mb: 1,
             }}
           >
-            <Typography variant="h6">Prescription</Typography>
+            <Typography variant="h6">
+              Prescription (R<sub>x</sub>)
+            </Typography>
             <Button
               startIcon={<AddIcon />}
               onClick={handleAddPrescriptionRow}
@@ -446,13 +571,15 @@ const ConsultationView = ({
               Add Medicine
             </Button>
           </Box>
+
           {prescription.map((item, index) => (
             <Grid
               container
-              spacing={2}
+              spacing={1}
               key={index}
-              sx={{ mb: 2, alignItems: "center" }}
+              sx={{ mb: 1.5, alignItems: "center" }}
             >
+              {/* Type - Focused when new row added */}
               <Grid item xs={2}>
                 <FormControl fullWidth size="small">
                   <InputLabel>Type</InputLabel>
@@ -460,6 +587,7 @@ const ConsultationView = ({
                     value={item.type}
                     label="Type"
                     onChange={(e) => handlePrescriptionChange(e, index, "type")}
+                    inputRef={(ref) => (typeRefs.current[index] = ref)}
                   >
                     {medicineTypes.map((type) => (
                       <MenuItem key={type} value={type}>
@@ -469,6 +597,8 @@ const ConsultationView = ({
                   </Select>
                 </FormControl>
               </Grid>
+
+              {/* Medicine */}
               <Grid item xs={4}>
                 <Autocomplete
                   options={availableMedicines}
@@ -494,20 +624,30 @@ const ConsultationView = ({
                   }}
                   isOptionEqualToValue={(a, b) => a.id === b.id}
                   renderInput={(params) => (
-                    <TextField {...params} label="Medicine" size="small" />
+                    <TextField
+                      {...params}
+                      label="Medicine"
+                      size="small"
+                      placeholder="Search medicine..."
+                    />
                   )}
                 />
               </Grid>
+
+              {/* Note */}
               <Grid item xs={5}>
                 <TextField
                   fullWidth
-                  label="Note"
+                  label="Note (Dosage & Instructions)"
                   size="small"
                   value={item.note}
                   onChange={(e) => handlePrescriptionChange(e, index, "note")}
+                  onKeyDown={(e) => handleNoteKeyDown(e, index)}
                   placeholder="e.g., 500mg, 1-0-1, after food, for 7 days"
                 />
               </Grid>
+
+              {/* Delete */}
               <Grid item xs={1}>
                 <IconButton
                   onClick={() => handleRemovePrescriptionRow(index)}
@@ -521,6 +661,7 @@ const ConsultationView = ({
           ))}
         </Grid>
 
+        {/* Medical Advice */}
         <Grid item xs={12}>
           <Typography variant="h6" gutterBottom>
             Medical Advice
@@ -531,10 +672,12 @@ const ConsultationView = ({
             rows={3}
             value={medicalAdvice}
             onChange={(e) => setMedicalAdvice(e.target.value)}
+            placeholder="Additional advice for the patient..."
           />
         </Grid>
       </Grid>
 
+      {/* Test Results Dialog */}
       <Dialog
         open={testResultsDialogOpen}
         onClose={() => setTestResultsDialogOpen(false)}
@@ -543,36 +686,45 @@ const ConsultationView = ({
       >
         <DialogTitle>Test Results</DialogTitle>
         <DialogContent>
-          <Table>
-            <TableBody>
-              {selectedTests.map((test) => (
-                <TableRow key={test.name}>
-                  <TableCell>{test.name}</TableCell>
-                  <TableCell>
-                    <TextField
-                      fullWidth
-                      multiline
-                      rows={3}
-                      value={currentTestResults[test.name] || ""}
-                      onChange={(e) =>
-                        setCurrentTestResults((prev) => ({
-                          ...prev,
-                          [test.name]: e.target.value,
-                        }))
-                      }
-                      placeholder="Enter test results..."
-                    />
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+          {selectedTests.length === 0 ? (
+            <Typography color="text.secondary" sx={{ py: 2 }}>
+              No tests prescribed yet.
+            </Typography>
+          ) : (
+            <Table>
+              <TableBody>
+                {selectedTests.map((test) => (
+                  <TableRow key={test.name}>
+                    <TableCell sx={{ fontWeight: "bold", width: "30%" }}>
+                      {test.name}
+                    </TableCell>
+                    <TableCell>
+                      <TextField
+                        fullWidth
+                        multiline
+                        rows={3}
+                        value={currentTestResults[test.name] || ""}
+                        onChange={(e) =>
+                          setCurrentTestResults((prev) => ({
+                            ...prev,
+                            [test.name]: e.target.value,
+                          }))
+                        }
+                        placeholder={`Enter ${test.name} results...`}
+                      />
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setTestResultsDialogOpen(false)}>Close</Button>
         </DialogActions>
       </Dialog>
 
+      {/* Action Buttons */}
       <Box sx={{ mt: 4, display: "flex", justifyContent: "space-between" }}>
         <Button
           variant="contained"
@@ -591,24 +743,29 @@ const ConsultationView = ({
             isSaving || !diagnosis.trim() || finalPrescription.length === 0
           }
         >
-          {isSaving ? "Saving..." : "Complete Consultation"}
+          {isSaving ? "Saving..." : "Complete Consultation & Print"}
         </Button>
       </Box>
-      <div style={{ display: "none" }}>
-        <OPDTicket
-          ref={ticketRef}
-          patient={patient}
-          diagnosis={diagnosis}
-          tests={selectedTests.map((t) => t.name)}
-          prescription={finalPrescription}
-          knownCaseOf={knownCaseOf}
-          chiefComplaints={chiefComplaints}
-          onExamination={onExamination}
-          medicalAdvice={medicalAdvice}
-          testResults={currentTestResults}
-        />
+
+      {/* Hidden OPD Ticket for printing */}
+      <div style={{ display: showTicket ? "block" : "none" }}>
+        <div ref={ticketRef}>
+          <OPDTicket
+            patient={patient}
+            diagnosis={diagnosis}
+            tests={selectedTests.map((t) => t.name)}
+            prescription={finalPrescription}
+            knownCaseOf={knownCaseOf}
+            chiefComplaints={chiefComplaints}
+            onExamination={onExamination}
+            medicalAdvice={medicalAdvice}
+            testResults={currentTestResults}
+            doctor={doctorData}
+          />
+        </div>
       </div>
     </Paper>
   );
 };
+
 export default ConsultationView;

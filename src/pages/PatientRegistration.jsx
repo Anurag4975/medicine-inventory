@@ -5,6 +5,8 @@ import {
   getDocs,
   doc,
   updateDoc,
+  query,
+  where,
 } from "firebase/firestore";
 import { db } from "../firebase";
 import {
@@ -54,7 +56,7 @@ function PatientRegistration({ userRole }) {
   const [success, setSuccess] = useState("");
   const [billDetails, setBillDetails] = useState(null);
   const [searchBillNo, setSearchBillNo] = useState("");
-  const [patients, setPatients] = useState([]);
+  const [matchedPatient, setMatchedPatient] = useState(null);
   const [editMode, setEditMode] = useState(false);
   const [openEditDialog, setOpenEditDialog] = useState(false);
 
@@ -73,20 +75,6 @@ function PatientRegistration({ userRole }) {
       }
     };
     fetchDoctors();
-
-    const fetchPatients = async () => {
-      try {
-        const querySnapshot = await getDocs(collection(db, "Patients"));
-        const patientList = querySnapshot.docs.map((doc) => ({
-          id: doc.id,
-          ...doc.data(),
-        }));
-        setPatients(patientList);
-      } catch (err) {
-        console.error("Error fetching patients:", err);
-      }
-    };
-    fetchPatients();
   }, []);
 
   useEffect(() => {
@@ -109,11 +97,23 @@ function PatientRegistration({ userRole }) {
     }));
   };
 
-  const handleSearchBillNo = () => {
-    const patient = patients.find(
-      (p) => p.billNo.toLowerCase() === searchBillNo.toLowerCase()
-    );
-    if (patient) {
+  const handleSearchBillNo = async () => {
+    setError("");
+    setSuccess("");
+    try {
+      const q = query(
+        collection(db, "Patients"),
+        where("billNo", "==", searchBillNo.trim()),
+      );
+      const snapshot = await getDocs(q);
+      if (snapshot.empty) {
+        setError("No patient found with this Bill No.");
+        setMatchedPatient(null);
+        return;
+      }
+      const docSnap = snapshot.docs[0];
+      const patient = { id: docSnap.id, ...docSnap.data() };
+      setMatchedPatient(patient);
       setFormData({
         name: patient.name,
         age: patient.age,
@@ -132,8 +132,9 @@ function PatientRegistration({ userRole }) {
       });
       setEditMode(true);
       setSuccess("Patient record found. You can update the details.");
-    } else {
-      setError("No patient found with this Bill No.");
+    } catch (err) {
+      console.error("Error searching for patient:", err);
+      setError("Failed to search for patient. Please try again.");
     }
   };
 
@@ -162,7 +163,7 @@ function PatientRegistration({ userRole }) {
         setError(
           `Please fill in the ${field
             .replace(/([A-Z])/g, " $1")
-            .toLowerCase()}.`
+            .toLowerCase()}.`,
         );
         return;
       }
@@ -198,13 +199,10 @@ function PatientRegistration({ userRole }) {
         appointmentDate: formData.appointmentDate,
         billNo: formData.billNo,
         createdAt: editMode
-          ? patients.find((p) => p.billNo === formData.billNo)?.createdAt ||
-            dayjs().toISOString()
+          ? matchedPatient?.createdAt || dayjs().toISOString()
           : dayjs().toISOString(),
         createdBy: userRole,
-        diagnoses: editMode
-          ? patients.find((p) => p.billNo === formData.billNo)?.diagnoses || []
-          : [],
+        diagnoses: editMode ? matchedPatient?.diagnoses || [] : [],
         doctorId: formData.doctorId,
         gender: formData.gender,
         name: formData.name,
@@ -220,9 +218,8 @@ function PatientRegistration({ userRole }) {
       };
 
       if (editMode) {
-        const patient = patients.find((p) => p.billNo === formData.billNo);
-        if (patient) {
-          await updateDoc(doc(db, "Patients", patient.id), patientData);
+        if (matchedPatient) {
+          await updateDoc(doc(db, "Patients", matchedPatient.id), patientData);
           setSuccess("Patient record updated successfully!");
         }
       } else {
@@ -239,7 +236,7 @@ function PatientRegistration({ userRole }) {
 
   const handlePrintBill = () => {
     const selectedDoctor = doctors.find(
-      (doc) => doc.id === billDetails.doctorId
+      (doc) => doc.id === billDetails.doctorId,
     );
 
     // Calculate financial figures
@@ -312,7 +309,7 @@ function PatientRegistration({ userRole }) {
                 ${
                   discountPercent > 0
                     ? `<tr><td>Disc (${discountPercent}%)</td><td>-${discountAmount.toFixed(
-                        2
+                        2,
                       )}</td></tr>`
                     : ""
                 }
@@ -366,6 +363,7 @@ function PatientRegistration({ userRole }) {
     setEditMode(false);
     setBillDetails(null);
     setSearchBillNo("");
+    setMatchedPatient(null);
   };
 
   return (

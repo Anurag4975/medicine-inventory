@@ -49,13 +49,47 @@ import {
   limit,
 } from "firebase/firestore";
 
+// Helper function to extract latest visit data (client-side, no additional reads)
+const getLatestVisitData = (patient) => {
+  if (!patient) return {};
+
+  // Check if pastVisits exists and has entries
+  if (patient.pastVisits && patient.pastVisits.length > 0) {
+    const latestVisit = patient.pastVisits[patient.pastVisits.length - 1];
+    return {
+      diagnosis:
+        latestVisit.diagnosis ||
+        patient.diagnoses?.[patient.diagnoses.length - 1]?.text ||
+        "",
+      tests: latestVisit.prescribedTests || patient.prescribedTests || [],
+      prescription: latestVisit.prescription || patient.prescription || [],
+      chiefComplaints:
+        latestVisit.chiefComplaints || patient.chiefComplaints || "",
+      onExamination: latestVisit.onExamination || patient.onExamination || "",
+      medicalAdvice: latestVisit.medicalAdvice || patient.medicalAdvice || "",
+      testResults: latestVisit.testResults || patient.testResults || {},
+    };
+  }
+
+  // Fallback to root level data
+  return {
+    diagnosis: patient.diagnoses?.[patient.diagnoses.length - 1]?.text || "",
+    tests: patient.prescribedTests || [],
+    prescription: patient.prescription || [],
+    chiefComplaints: patient.chiefComplaints || "",
+    onExamination: patient.onExamination || "",
+    medicalAdvice: patient.medicalAdvice || "",
+    testResults: patient.testResults || {},
+  };
+};
+
 // Modern styled components
 const ModernPaper = styled(Paper)(({ theme }) => ({
   padding: theme.spacing(3),
   borderRadius: theme.spacing(2),
   background: `linear-gradient(135deg, ${alpha(
     theme.palette.background.paper,
-    0.8
+    0.8,
   )} 0%, ${alpha(theme.palette.background.paper, 0.9)} 100%)`,
   backdropFilter: "blur(10px)",
   boxShadow: "0 8px 32px rgba(0, 0, 0, 0.08)",
@@ -201,12 +235,12 @@ const PatientRecords = ({ userRole }) => {
   const [error, setError] = useState(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedDate, setSelectedDate] = useState(
-    moment().format("YYYY-MM-DD")
+    moment().format("YYYY-MM-DD"),
   );
-  const [statusFilter, setStatusFilter] = useState("completed"); // default
+  const [statusFilter, setStatusFilter] = useState("completed");
   const ticketRef = useRef();
 
-  // Fetch doctors once
+  // Fetch doctors once (single read for all doctors)
   useEffect(() => {
     const fetchDoctors = async () => {
       try {
@@ -224,15 +258,15 @@ const PatientRecords = ({ userRole }) => {
     fetchDoctors();
   }, []);
 
-  // Fetch records for the selected date (real-time)
+  // Fetch records for the selected date (real-time listener - single query)
   useEffect(() => {
-    if (searchTerm) return; // do not listen when searching
+    if (searchTerm) return; // Don't listen when searching
 
     setLoading(true);
     const q = query(
       collection(db, "Patients"),
       where("appointmentDate", "==", selectedDate),
-      orderBy("createdAt", "desc")
+      orderBy("createdAt", "desc"),
     );
 
     const unsubscribe = onSnapshot(
@@ -249,13 +283,13 @@ const PatientRecords = ({ userRole }) => {
         console.error("Error fetching patients:", err);
         setError("Failed to load patient data.");
         setLoading(false);
-      }
+      },
     );
 
     return () => unsubscribe();
   }, [selectedDate, searchTerm]);
 
-  // Search (manual query, not real-time)
+  // Search (batched queries - efficient)
   const handleSearch = useCallback(async () => {
     if (!searchTerm) {
       setError("Please enter a search term.");
@@ -266,15 +300,24 @@ const PatientRecords = ({ userRole }) => {
       setLoading(true);
       const term = searchTerm.trim();
 
+      // Run all queries in parallel (still 3 reads max)
       const queries = [
         query(
           collection(db, "Patients"),
           where("name", ">=", term),
           where("name", "<=", term + "\uf8ff"),
-          limit(20)
+          limit(20),
         ),
-        query(collection(db, "Patients"), where("phone", "==", term)),
-        query(collection(db, "Patients"), where("billNo", "==", term)),
+        query(
+          collection(db, "Patients"),
+          where("phone", "==", term),
+          limit(20),
+        ),
+        query(
+          collection(db, "Patients"),
+          where("billNo", "==", term),
+          limit(20),
+        ),
       ];
 
       const snapshots = await Promise.all(queries.map((q) => getDocs(q)));
@@ -300,19 +343,19 @@ const PatientRecords = ({ userRole }) => {
     }
   }, [searchTerm]);
 
-  // Filter patients by status
+  // Filter patients by status (client-side, no reads)
   const filteredPatients = useMemo(() => {
     let result = [...patients];
     if (statusFilter !== "all") {
       result = result.filter(
         (patient) =>
-          patient.status?.toLowerCase() === statusFilter.toLowerCase()
+          patient.status?.toLowerCase() === statusFilter.toLowerCase(),
       );
     }
     return result;
   }, [patients, statusFilter]);
 
-  // Fetch full patient details for view/print
+  // Fetch full patient details for view (single document read)
   const fetchFullPatientDetails = useCallback(async (patientId) => {
     try {
       const docRef = doc(db, "Patients", patientId);
@@ -355,8 +398,12 @@ const PatientRecords = ({ userRole }) => {
         setError("Patient details not found.");
       }
     },
-    [fetchFullPatientDetails]
+    [fetchFullPatientDetails],
   );
+
+  // Prepare print data using helper function (client-side processing)
+  const patientForPrint = printPatient || viewPatient;
+  const visitData = getLatestVisitData(patientForPrint);
 
   if (loading) {
     return (
@@ -444,40 +491,16 @@ const PatientRecords = ({ userRole }) => {
       <div style={{ display: "none" }}>
         <div ref={ticketRef}>
           <OPDTicket
-            patient={printPatient || viewPatient}
-            diagnosis={
-              printPatient?.diagnoses?.[0]?.text ||
-              viewPatient?.diagnoses?.[0]?.text ||
-              ""
-            }
-            tests={
-              printPatient?.prescribedTests ||
-              viewPatient?.prescribedTests ||
-              []
-            }
-            prescription={
-              printPatient?.prescription || viewPatient?.prescription || []
-            }
-            knownCaseOf={
-              printPatient?.knownCaseOf || viewPatient?.knownCaseOf || ""
-            }
-            chiefComplaints={
-              printPatient?.chiefComplaints ||
-              viewPatient?.chiefComplaints ||
-              ""
-            }
-            onExamination={
-              printPatient?.onExamination || viewPatient?.onExamination || ""
-            }
-            medicalAdvice={
-              printPatient?.medicalAdvice || viewPatient?.medicalAdvice || ""
-            }
-            testResults={
-              printPatient?.testResults || viewPatient?.testResults || {}
-            }
-            doctor={
-              doctors[printPatient?.doctorId] || doctors[viewPatient?.doctorId]
-            }
+            patient={patientForPrint}
+            diagnosis={visitData.diagnosis}
+            tests={visitData.tests}
+            prescription={visitData.prescription}
+            knownCaseOf={patientForPrint?.knownCaseOf || ""}
+            chiefComplaints={visitData.chiefComplaints}
+            onExamination={visitData.onExamination}
+            medicalAdvice={visitData.medicalAdvice}
+            testResults={visitData.testResults}
+            doctor={doctors[patientForPrint?.doctorId]}
           />
         </div>
       </div>
