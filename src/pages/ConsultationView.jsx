@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
+import { appCache } from "../utils/appCache";
 import {
   Box,
   Typography,
@@ -283,8 +284,15 @@ const ConsultationView = ({
       }
 
       batch.update(patientRef, patientUpdate);
+
       await batch.commit();
+
+      // Clear legacy session cache
       clearPatientCache(patient.id);
+
+      // Invalidate application cache
+      await appCache.invalidatePatient(patient.id);
+      await appCache.invalidatePatients();
 
       if (complete) {
         if (doctorData) {

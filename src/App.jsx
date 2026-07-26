@@ -5,6 +5,7 @@ import {
   Navigate,
 } from "react-router-dom";
 import { useEffect, useState } from "react";
+import { appCache } from "./utils/appCache";
 import { onAuthStateChanged } from "firebase/auth";
 import { doc, getDoc } from "firebase/firestore";
 import { auth, db } from "./firebase";
@@ -30,16 +31,34 @@ function App() {
   const [userRole, setUserRole] = useState(null);
   const [loading, setLoading] = useState(true);
 
+  // Initialize shared cache listeners ONCE - BEFORE routes render
+  useEffect(() => {
+    appCache.initialize();
+
+    return () => {
+      appCache.destroy();
+    };
+  }, []);
+
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
         try {
+          // Check sessionStorage first
+          const cachedRole = sessionStorage.getItem("userRole");
+          if (cachedRole) {
+            setUserRole(cachedRole);
+            setLoading(false);
+            return;
+          }
+
           const userDocRef = doc(db, "Users", user.uid);
           const userDoc = await getDoc(userDocRef);
           if (userDoc.exists()) {
-            setUserRole(userDoc.data().role);
+            const role = userDoc.data().role;
+            setUserRole(role);
+            sessionStorage.setItem("userRole", role);
           } else {
-            console.warn("User document does not exist in Firestore");
             setUserRole(null);
           }
         } catch (err) {
@@ -48,6 +67,7 @@ function App() {
         }
       } else {
         setUserRole(null);
+        sessionStorage.removeItem("userRole");
       }
       setLoading(false);
     });
@@ -66,7 +86,6 @@ function App() {
     <Router>
       {userRole && <Navbar userRole={userRole} />}
       <Routes>
-        {/* Root Route */}
         <Route
           path="/"
           element={
@@ -81,8 +100,6 @@ function App() {
             )
           }
         />
-
-        {/* Login */}
         <Route
           path="/login"
           element={
@@ -95,17 +112,11 @@ function App() {
             )
           }
         />
-
-        {/* Public */}
         <Route path="/home" element={<Home userRole={userRole} />} />
-
-        {/* Admin-only routes */}
         <Route
           path="/stock"
           element={userRole === "admin" ? <Stock /> : <Navigate to="/home" />}
         />
-
-        {/* Admin + Staff routes */}
         <Route
           path="/sales"
           element={
@@ -166,8 +177,6 @@ function App() {
             )
           }
         />
-
-        {/* Admin + Lab routes */}
         <Route
           path="/lab-tests"
           element={
@@ -178,8 +187,6 @@ function App() {
             )
           }
         />
-
-        {/* Returns - Fixed path to match Navbar */}
         <Route
           path="/Returns"
           element={
@@ -190,7 +197,6 @@ function App() {
             )
           }
         />
-        {/* Also keep lowercase version for compatibility */}
         <Route
           path="/returns"
           element={
@@ -201,8 +207,6 @@ function App() {
             )
           }
         />
-
-        {/* Dashboards */}
         <Route
           path="/dashboard"
           element={
@@ -215,8 +219,6 @@ function App() {
             )
           }
         />
-
-        {/* Fallback */}
         <Route
           path="*"
           element={

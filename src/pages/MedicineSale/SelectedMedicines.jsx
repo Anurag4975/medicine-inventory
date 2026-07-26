@@ -18,7 +18,10 @@ const SelectedMedicines = ({ selectedMedicines, setSelectedMedicines }) => {
           ? {
               ...med,
               quantity: value === "" ? "" : Number(value),
-              total: value === "" ? 0 : Number(value) * med.pricePerTab,
+              total:
+                value === ""
+                  ? 0
+                  : Number(value) * (med.price || med.pricePerTab || 0),
             }
           : med,
       ),
@@ -35,20 +38,19 @@ const SelectedMedicines = ({ selectedMedicines, setSelectedMedicines }) => {
                 med.quantity === "" || med.quantity < 1 ? 1 : med.quantity,
               total:
                 (med.quantity === "" || med.quantity < 1 ? 1 : med.quantity) *
-                med.pricePerTab,
+                (med.price || med.pricePerTab || 0),
             }
           : med,
       ),
     );
   };
 
-  // New function to handle deleting a medicine
   const handleDelete = (id) => {
     setSelectedMedicines(selectedMedicines.filter((med) => med.id !== id));
   };
 
   const totalAmount = selectedMedicines.reduce(
-    (sum, medicine) => sum + medicine.total,
+    (sum, medicine) => sum + (medicine.total || 0),
     0,
   );
 
@@ -88,7 +90,7 @@ const SelectedMedicines = ({ selectedMedicines, setSelectedMedicines }) => {
         />
       </Box>
 
-      {/* Responsive List Container */}
+      {/* Medicine List */}
       <Stack
         spacing={1.5}
         divider={<Divider sx={{ borderColor: "#e2e8f0" }} />}
@@ -109,19 +111,21 @@ const SelectedMedicines = ({ selectedMedicines, setSelectedMedicines }) => {
               "&:hover": { backgroundColor: "#f1f5f9" },
             }}
           >
-            {/* Left Side: Name and Brand */}
+            {/* Medicine Name */}
             <Box sx={{ flex: "1 1 150px", minWidth: "150px" }}>
               <Typography
                 sx={{ fontSize: "0.85rem", fontWeight: 700, color: "#0f172a" }}
               >
                 {med.medicineName}
               </Typography>
-              <Typography sx={{ fontSize: "0.75rem", color: "#64748b" }}>
-                {med.brand}
-              </Typography>
+              {med.brand && (
+                <Typography sx={{ fontSize: "0.75rem", color: "#64748b" }}>
+                  {med.brand}
+                </Typography>
+              )}
             </Box>
 
-            {/* Right Side: Price, Qty, Total, and Delete Button */}
+            {/* Price, Qty, Total */}
             <Box
               sx={{
                 display: "flex",
@@ -138,7 +142,7 @@ const SelectedMedicines = ({ selectedMedicines, setSelectedMedicines }) => {
                   minWidth: "60px",
                 }}
               >
-                ₹{med.pricePerTab.toFixed(2)}
+                NPR {(med.price || med.pricePerTab || 0).toFixed(2)}
               </Typography>
 
               <TextField
@@ -160,12 +164,9 @@ const SelectedMedicines = ({ selectedMedicines, setSelectedMedicines }) => {
                     fontSize: "0.85rem",
                     "&::-webkit-outer-spin-button, &::-webkit-inner-spin-button":
                       {
-                        "-webkit-appearance": "none",
+                        WebkitAppearance: "none",
                         margin: 0,
                       },
-                    "&[type=number]": {
-                      "-moz-appearance": "textfield",
-                    },
                   },
                 }}
               />
@@ -189,11 +190,10 @@ const SelectedMedicines = ({ selectedMedicines, setSelectedMedicines }) => {
                     color: "#0369a1",
                   }}
                 >
-                  ₹{med.total.toFixed(2)}
+                  NPR {(med.total || 0).toFixed(2)}
                 </Typography>
               </Box>
 
-              {/* Delete Action Button */}
               <IconButton
                 onClick={() => handleDelete(med.id)}
                 color="error"
@@ -210,7 +210,7 @@ const SelectedMedicines = ({ selectedMedicines, setSelectedMedicines }) => {
         ))}
       </Stack>
 
-      {/* Footer / Grand Total */}
+      {/* Grand Total */}
       <Box
         sx={{
           display: "flex",
@@ -231,7 +231,7 @@ const SelectedMedicines = ({ selectedMedicines, setSelectedMedicines }) => {
         <Typography
           sx={{ fontWeight: 900, fontSize: "1.2rem", color: "#0369a1" }}
         >
-          ₹{totalAmount.toFixed(2)}
+          NPR {totalAmount.toFixed(2)}
         </Typography>
       </Box>
     </Paper>

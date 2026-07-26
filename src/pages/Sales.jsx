@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
+import { appCache, CACHE_KEYS, cacheEvents } from "../utils/appCache";
 import {
   Box,
   Typography,
@@ -43,110 +44,7 @@ import {
 } from "@mui/icons-material";
 import { onAuthStateChanged } from "firebase/auth";
 import { auth, db } from "../firebase";
-import {
-  collection,
-  getDoc,
-  doc,
-  writeBatch,
-  query,
-  where,
-  limit,
-  onSnapshot,
-} from "firebase/firestore";
-
-// ---------------------------------------------------------------------------
-// Custom Hook: Stock Data (1 real-time listener)
-// ---------------------------------------------------------------------------
-const useStockData = () => {
-  const [stocks, setStocks] = useState([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    const q = query(collection(db, "Stock"), where("quantity", ">", 0));
-
-    const unsubscribe = onSnapshot(
-      q,
-      (snapshot) => {
-        const stockData = snapshot.docs.map((doc) => ({
-          id: doc.id,
-          ...doc.data(),
-          price:
-            doc.data().pricePerTab ||
-            doc.data().price ||
-            doc.data().sellingPrice ||
-            0,
-          medicineName: doc.data().medicineName || "Unknown",
-        }));
-        setStocks(stockData);
-        setLoading(false);
-      },
-      (error) => {
-        console.error("Stock listener error:", error);
-        setLoading(false);
-      },
-    );
-
-    return () => unsubscribe();
-  }, []);
-
-  return { stocks, loading };
-};
-
-// ---------------------------------------------------------------------------
-// Custom Hook: Today's Patients (1 real-time listener) - FIXED DATE
-// ---------------------------------------------------------------------------
-const useTodaysPatients = () => {
-  const [patients, setPatients] = useState([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    // FIXED: Use local date instead of UTC toISOString
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = String(now.getMonth() + 1).padStart(2, "0");
-    const day = String(now.getDate()).padStart(2, "0");
-    const todayStr = `${year}-${month}-${day}`;
-
-    const q = query(
-      collection(db, "Patients"),
-      where("appointmentDate", "==", todayStr),
-      limit(30),
-    );
-
-    const unsubscribe = onSnapshot(
-      q,
-      (snapshot) => {
-        const patientData = snapshot.docs
-          .map((doc) => ({
-            id: doc.id,
-            ...doc.data(),
-          }))
-          .filter((p) => {
-            // Only show patients with prescriptions
-            const hasPrescription =
-              (p.prescription && p.prescription.length > 0) ||
-              (p.pastVisits &&
-                p.pastVisits[p.pastVisits.length - 1]?.prescription?.length >
-                  0);
-            return hasPrescription;
-          })
-          // Sort by most recent
-          .sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
-
-        setPatients(patientData);
-        setLoading(false);
-      },
-      (error) => {
-        console.error("Patients listener error:", error);
-        setLoading(false);
-      },
-    );
-
-    return () => unsubscribe();
-  }, []);
-
-  return { patients, loading };
-};
+import { collection, getDoc, doc, writeBatch } from "firebase/firestore";
 
 // ---------------------------------------------------------------------------
 // Main Sales Component
@@ -177,12 +75,66 @@ function Sales() {
   const [patientSearch, setPatientSearch] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("all");
 
-  // Custom hooks - only 2 real-time listeners
-  const { stocks, loading: stocksLoading } = useStockData();
-  const { patients: todaysPatients, loading: patientsLoading } =
-    useTodaysPatients();
+  // Stock data via shared cache
+  const [stocks, setStocks] = useState([]);
+  const [stocksLoading, setStocksLoading] = useState(true);
 
-  // Auth - single read with sessionStorage cache
+  // Today's patients via shared cache
+  const [todaysPatients, setTodaysPatients] = useState([]);
+  const [patientsLoading, setPatientsLoading] = useState(true);
+
+  // Subscribe to shared stock data
+  useEffect(() => {
+    // Get cached data immediately
+    const cached = appCache.getCachedStock();
+    if (cached && cached.length > 0) {
+      setStocks(cached);
+      setStocksLoading(false);
+    }
+
+    const unsubscribe = cacheEvents.on(CACHE_KEYS.STOCK, (data) => {
+      if (data && data.length > 0) {
+        setStocks(data);
+        setStocksLoading(false);
+      }
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  // Subscribe to shared patients data
+  useEffect(() => {
+    const cached = appCache.getCachedPatients();
+    if (cached && cached.length > 0) {
+      const withPrescriptions = cached.filter((p) => {
+        const hasPrescription =
+          (p.prescription && p.prescription.length > 0) ||
+          (p.pastVisits &&
+            p.pastVisits[p.pastVisits.length - 1]?.prescription?.length > 0);
+        return hasPrescription;
+      });
+      setTodaysPatients(withPrescriptions);
+      setPatientsLoading(false);
+    }
+
+    const unsubscribe = cacheEvents.on(CACHE_KEYS.TODAYS_PATIENTS, (data) => {
+      if (data && data.length > 0) {
+        const withPrescriptions = data.filter((p) => {
+          const hasPrescription =
+            (p.prescription && p.prescription.length > 0) ||
+            (p.pastVisits &&
+              p.pastVisits[p.pastVisits.length - 1]?.prescription?.length > 0);
+          return hasPrescription;
+        });
+        setTodaysPatients(withPrescriptions);
+        setPatientsLoading(false);
+      }
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  // Auth
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
@@ -253,7 +205,6 @@ function Sales() {
   const discountAmount = discount ? parseFloat(discount) || 0 : 0;
   const total = Math.max(0, subtotal - discountAmount);
 
-  // Show snackbar
   const showSnackbar = useCallback((message, severity = "success") => {
     setSnackbar({ open: true, message, severity });
   }, []);
@@ -265,10 +216,7 @@ function Sales() {
         const existing = prev.find((item) => item.id === medicine.id);
         if (existing) {
           if (existing.quantity >= medicine.quantity) {
-            showSnackbar(
-              `Only ${medicine.quantity} ${medicine.medicineName} available`,
-              "error",
-            );
+            showSnackbar(`Only ${medicine.quantity} available`, "error");
             return prev;
           }
           return prev.map((item) =>
@@ -297,12 +245,10 @@ function Sales() {
     [showSnackbar],
   );
 
-  // Remove medicine from cart
   const removeMedicine = useCallback((id) => {
     setSelectedMedicines((prev) => prev.filter((item) => item.id !== id));
   }, []);
 
-  // Update quantity
   const updateQuantity = useCallback(
     (id, change) => {
       setSelectedMedicines((prev) =>
@@ -310,16 +256,11 @@ function Sales() {
           if (item.id !== id) return item;
           const newQuantity = item.quantity + change;
           if (newQuantity < 1) return item;
-
           const stockItem = stocks.find((s) => s.id === id);
           if (stockItem && newQuantity > stockItem.quantity) {
-            showSnackbar(
-              `Only ${stockItem.quantity} ${stockItem.medicineName} available`,
-              "error",
-            );
+            showSnackbar(`Only ${stockItem.quantity} available`, "error");
             return item;
           }
-
           return {
             ...item,
             quantity: newQuantity,
@@ -331,7 +272,6 @@ function Sales() {
     [stocks, showSnackbar],
   );
 
-  // Get prescription from patient data
   const getPatientPrescription = useCallback((patientData) => {
     if (patientData.pastVisits && patientData.pastVisits.length > 0) {
       return (
@@ -342,10 +282,8 @@ function Sales() {
     return patientData.prescription || [];
   }, []);
 
-  // Add patient prescription to cart
   const addPatientPrescription = useCallback(
     (patientData) => {
-      // Set patient info
       setPatient({
         name: patientData.name || "",
         age: patientData.age || "",
@@ -355,21 +293,17 @@ function Sales() {
       });
 
       const prescription = getPatientPrescription(patientData);
-
       if (prescription.length === 0) {
-        showSnackbar("No prescription found for this patient", "warning");
+        showSnackbar("No prescription found", "warning");
         return;
       }
 
-      // Add each prescribed medicine
       prescription.forEach((med) => {
         const stockItem = stocks.find((s) => s.id === med.medicineId);
-
         if (stockItem) {
           setSelectedMedicines((prev) => {
             const existing = prev.find((item) => item.id === stockItem.id);
             if (existing) return prev;
-
             return [
               ...prev,
               {
@@ -390,17 +324,15 @@ function Sales() {
     [stocks, getPatientPrescription, showSnackbar],
   );
 
-  // Clear cart
   const clearCart = useCallback(() => {
     setSelectedMedicines([]);
     setPatient({ name: "", age: "", gender: "", phone: "", address: "" });
     setDiscount("");
   }, []);
 
-  // Submit sale
   const handleSubmitSale = async () => {
     if (selectedMedicines.length === 0) {
-      showSnackbar("Please add medicines to cart", "error");
+      showSnackbar("Please add medicines", "error");
       return;
     }
 
@@ -429,23 +361,17 @@ function Sales() {
         totalAmount: total,
         paymentMethod,
         saleDate: now.toISOString(),
-        seller: {
-          uid: auth.currentUser?.uid || "unknown",
-          role: userRole,
-        },
+        seller: { uid: auth.currentUser?.uid || "unknown", role: userRole },
       };
 
-      // Batch write for atomic operation
       const batch = writeBatch(db);
       const saleRef = doc(collection(db, "Sales"));
       batch.set(saleRef, saleData);
 
-      // Update stock quantities
       selectedMedicines.forEach((med) => {
         const stockItem = stocks.find((s) => s.id === med.id);
         if (stockItem) {
-          const stockRef = doc(db, "Stock", med.id);
-          batch.update(stockRef, {
+          batch.update(doc(db, "Stock", med.id), {
             quantity: stockItem.quantity - med.quantity,
             lastUpdated: now.toISOString(),
           });
@@ -453,12 +379,11 @@ function Sales() {
       });
 
       await batch.commit();
+      await appCache.invalidateStock();
 
       setReceipt({ ...saleData, id: saleRef.id });
       setShowReceipt(true);
-      showSnackbar("Sale completed successfully!");
-
-      // Reset
+      showSnackbar("Sale completed!");
       clearCart();
     } catch (error) {
       console.error("Sale error:", error);
@@ -510,7 +435,7 @@ function Sales() {
 
       {/* Main Layout */}
       <Box sx={{ flex: 1, display: "flex", overflow: "hidden" }}>
-        {/* LEFT SIDEBAR - Medicine Browser (280px) */}
+        {/* LEFT - Medicine Browser */}
         <Box
           sx={{
             width: "280px",
@@ -520,7 +445,6 @@ function Sales() {
             bgcolor: "#fff",
           }}
         >
-          {/* Search & Filter */}
           <Box sx={{ p: 1.5 }}>
             <Typography
               variant="subtitle2"
@@ -532,7 +456,7 @@ function Sales() {
             </Typography>
             <TextField
               size="small"
-              placeholder="Search medicines..."
+              placeholder="Search..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               InputProps={{
@@ -552,7 +476,6 @@ function Sales() {
               }}
               fullWidth
             />
-            {/* Category Chips */}
             <Box sx={{ display: "flex", gap: 0.5, mt: 1, flexWrap: "wrap" }}>
               {medicineTypes.slice(0, 6).map((type) => (
                 <Chip
@@ -567,20 +490,10 @@ function Sales() {
               ))}
             </Box>
           </Box>
-
-          {/* Medicine List */}
           <Box sx={{ flex: 1, overflow: "auto" }}>
             {stocksLoading ? (
               <Box textAlign="center" py={4}>
                 <CircularProgress size={20} />
-                <Typography variant="caption" display="block" mt={1}>
-                  Loading medicines...
-                </Typography>
-              </Box>
-            ) : filteredStocks.length === 0 ? (
-              <Box textAlign="center" py={4} color="text.secondary">
-                <PharmacyIcon sx={{ fontSize: 40, opacity: 0.3, mb: 1 }} />
-                <Typography variant="body2">No medicines found</Typography>
               </Box>
             ) : (
               filteredStocks.map((stock) => (
@@ -637,7 +550,7 @@ function Sales() {
           </Box>
         </Box>
 
-        {/* CENTER - Cart (Flexible width) */}
+        {/* CENTER - Cart */}
         <Box
           sx={{
             flex: 1,
@@ -647,7 +560,6 @@ function Sales() {
             minWidth: 0,
           }}
         >
-          {/* Cart Header */}
           <Box
             sx={{
               px: 3,
@@ -681,18 +593,13 @@ function Sales() {
               </Button>
             )}
           </Box>
-
-          {/* Cart Items */}
           <Box sx={{ flex: 1, overflow: "auto" }}>
             {selectedMedicines.length === 0 ? (
               <Box textAlign="center" py={10} color="text.secondary">
                 <ShoppingBagIcon sx={{ fontSize: 64, opacity: 0.15, mb: 2 }} />
-                <Typography variant="h6" color="text.secondary">
-                  Cart is empty
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  Click medicines from the left or select a patient from the
-                  right
+                <Typography variant="h6">Cart is empty</Typography>
+                <Typography variant="body2">
+                  Click medicines or select a patient
                 </Typography>
               </Box>
             ) : (
@@ -735,9 +642,7 @@ function Sales() {
                           />
                         </TableCell>
                         <TableCell align="center">
-                          <Typography variant="body2">
-                            NPR {item.price?.toFixed(2)}
-                          </Typography>
+                          NPR {item.price?.toFixed(2)}
                         </TableCell>
                         <TableCell align="center">
                           <Box
@@ -769,11 +674,7 @@ function Sales() {
                           </Box>
                         </TableCell>
                         <TableCell align="right">
-                          <Typography
-                            variant="body2"
-                            fontWeight="bold"
-                            color="primary"
-                          >
+                          <Typography fontWeight="bold" color="primary">
                             NPR {item.total?.toFixed(2)}
                           </Typography>
                         </TableCell>
@@ -793,13 +694,10 @@ function Sales() {
               </TableContainer>
             )}
           </Box>
-
-          {/* Bottom Section - Totals & Patient Info */}
           <Box
             sx={{ borderTop: "1px solid #e0e0e0", bgcolor: "#fafafa", p: 3 }}
           >
             <Grid container spacing={3}>
-              {/* Left: Patient Info */}
               <Grid item xs={7}>
                 <Typography variant="subtitle2" fontWeight="bold" gutterBottom>
                   <PersonIcon
@@ -866,8 +764,6 @@ function Sales() {
                   </Grid>
                 </Grid>
               </Grid>
-
-              {/* Right: Totals */}
               <Grid item xs={5}>
                 <Box
                   sx={{
@@ -912,8 +808,6 @@ function Sales() {
                       NPR {total.toFixed(2)}
                     </Typography>
                   </Box>
-
-                  {/* Payment Method */}
                   <Typography
                     variant="caption"
                     color="text.secondary"
@@ -937,7 +831,6 @@ function Sales() {
                       />
                     ))}
                   </Box>
-
                   <Button
                     variant="contained"
                     fullWidth
@@ -951,11 +844,7 @@ function Sales() {
                         <PaymentIcon />
                       )
                     }
-                    sx={{
-                      py: 1.5,
-                      borderRadius: 2,
-                      fontWeight: "bold",
-                    }}
+                    sx={{ py: 1.5, borderRadius: 2, fontWeight: "bold" }}
                   >
                     {processing
                       ? "Processing..."
@@ -967,7 +856,7 @@ function Sales() {
           </Box>
         </Box>
 
-        {/* RIGHT SIDEBAR - Today's Patients (280px) */}
+        {/* RIGHT - Patients */}
         <Box
           sx={{
             width: "280px",
@@ -986,14 +875,6 @@ function Sales() {
             >
               👨‍⚕️ Today's Patients
             </Typography>
-            <Typography
-              variant="caption"
-              color="text.secondary"
-              display="block"
-              gutterBottom
-            >
-              Click to load prescription
-            </Typography>
             <TextField
               size="small"
               placeholder="Search patients..."
@@ -1010,23 +891,16 @@ function Sales() {
               fullWidth
             />
           </Box>
-
           <Box sx={{ flex: 1, overflow: "auto" }}>
             {patientsLoading ? (
               <Box textAlign="center" py={4}>
                 <CircularProgress size={20} />
-                <Typography variant="caption" display="block" mt={1}>
-                  Loading patients...
-                </Typography>
               </Box>
             ) : filteredPatients.length === 0 ? (
               <Box textAlign="center" py={4} color="text.secondary">
                 <HospitalIcon sx={{ fontSize: 40, opacity: 0.2, mb: 1 }} />
                 <Typography variant="body2">
-                  No patients with prescriptions today
-                </Typography>
-                <Typography variant="caption">
-                  New patients will appear here
+                  No patients with prescriptions
                 </Typography>
               </Box>
             ) : (
@@ -1041,7 +915,6 @@ function Sales() {
                       py: 1.5,
                       cursor: "pointer",
                       borderBottom: "1px solid #f0f0f0",
-                      transition: "all 0.15s",
                       "&:hover": { bgcolor: "#e3f2fd" },
                     }}
                   >
@@ -1131,17 +1004,9 @@ function Sales() {
           </Box>
           {patient.name && (
             <Typography variant="body2" mt={1}>
-              Patient: {patient.name} • Payment: {paymentMethod}
+              Patient: {patient.name} • {paymentMethod}
             </Typography>
           )}
-          <Typography
-            variant="caption"
-            color="text.secondary"
-            display="block"
-            mt={1}
-          >
-            Stock quantities will be updated automatically after confirmation.
-          </Typography>
         </DialogContent>
         <DialogActions>
           <Button
@@ -1216,7 +1081,7 @@ function Sales() {
               <Divider sx={{ my: 1.5 }} />
               <Box display="flex" justifyContent="space-between">
                 <Typography variant="h6">Total</Typography>
-                <Typography variant="h6" color="primary" fontWeight="bold">
+                <Typography variant="h6" color="primary">
                   NPR {receipt.totalAmount?.toFixed(2)}
                 </Typography>
               </Box>
@@ -1233,7 +1098,7 @@ function Sales() {
         </DialogContent>
       </Dialog>
 
-      {/* Snackbar Notifications */}
+      {/* Snackbar */}
       <Snackbar
         open={snackbar.open}
         autoHideDuration={3000}

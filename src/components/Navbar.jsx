@@ -30,6 +30,7 @@ import {
   Dashboard as DashboardIcon,
   AssignmentReturn as ReturnsIcon,
 } from "@mui/icons-material";
+import OfflineIndicator from "./OfflineIndicator";
 
 const roleColors = {
   admin: "#ff6b6b",
@@ -38,7 +39,6 @@ const roleColors = {
   default: "#95a5a6",
 };
 
-// Updated to match your actual routes from Home page
 const navItems = [
   { label: "Home", path: "/home", icon: <HomeIcon fontSize="small" /> },
   {
@@ -172,12 +172,13 @@ function Navbar({ userRole }) {
               }}
             />
           )}
+          {/* Offline Indicator */}
+          <OfflineIndicator />
         </Box>
 
         {/* Desktop Navigation */}
         {!isMobile ? (
           <Box sx={{ display: "flex", gap: 0.5, alignItems: "center" }}>
-            {/* Main navigation items */}
             {filteredNavItems.slice(0, 6).map((item) => (
               <Button
                 key={item.label}
@@ -205,7 +206,6 @@ function Navbar({ userRole }) {
               </Button>
             ))}
 
-            {/* More items dropdown if needed */}
             {filteredNavItems.length > 6 && (
               <>
                 <Button
@@ -255,7 +255,6 @@ function Navbar({ userRole }) {
               </>
             )}
 
-            {/* Logout button */}
             <Button
               onClick={handleLogout}
               startIcon={<LogoutIcon />}
@@ -277,7 +276,6 @@ function Navbar({ userRole }) {
             </Button>
           </Box>
         ) : (
-          /* Mobile Navigation */
           <>
             <IconButton
               color="inherit"

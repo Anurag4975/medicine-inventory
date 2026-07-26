@@ -5,6 +5,7 @@ import React, {
   useRef,
   useMemo,
 } from "react";
+import { appCache } from "../utils/appCache";
 import {
   Typography,
   Box,
@@ -241,20 +242,18 @@ const PatientRecords = ({ userRole }) => {
   const ticketRef = useRef();
 
   // Fetch doctors once (single read for all doctors)
+  // Fetch doctors from cache
   useEffect(() => {
     const fetchDoctors = async () => {
       try {
-        const querySnapshot = await getDocs(collection(db, "Doctors"));
-        const doctorMap = {};
-        querySnapshot.forEach((doc) => {
-          doctorMap[doc.id] = doc.data();
-        });
+        const doctorMap = await appCache.getDoctors();
         setDoctors(doctorMap);
       } catch (err) {
         console.error("Error fetching doctors:", err);
         setError("Could not fetch doctor information.");
       }
     };
+
     fetchDoctors();
   }, []);
 

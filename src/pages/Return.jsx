@@ -23,7 +23,6 @@ import {
   getDocs,
   query,
   where,
-  deleteDoc,
 } from "firebase/firestore";
 import SelectedMedicines from "./MedicineSale/SelectedMedicines";
 
@@ -74,11 +73,19 @@ function Returns() {
       }
       const sale = saleDocs.docs[0].data();
       setSaleData({ id: saleDocs.docs[0].id, ...sale });
-      setSelectedMedicines(sale.medicines);
-      setPatient(sale.patient);
-      setDiscount(sale.discount.toString());
-      setPaymentType(sale.paymentType);
-      setPaidAmount(sale.paidAmount.toString());
+      setSelectedMedicines(sale.medicines || []);
+      setPatient(
+        sale.patient || {
+          name: "",
+          age: "",
+          gender: "",
+          address: "",
+          phone: "",
+        },
+      );
+      setDiscount(sale.discount != null ? sale.discount.toString() : "0");
+      setPaymentType(sale.paymentType || "fullyPaid");
+      setPaidAmount(sale.paidAmount != null ? sale.paidAmount.toString() : "0");
       setError("");
     } catch (err) {
       setError("Error fetching sale: " + err.message);
@@ -92,8 +99,11 @@ function Returns() {
   };
 
   const calculateTotal = (medicines, discount) => {
-    const subtotal = medicines.reduce((sum, item) => sum + item.total, 0);
-    const discountAmount = discount ? parseFloat(discount) : 0;
+    const subtotal = medicines.reduce(
+      (sum, item) => sum + (item.total || 0),
+      0,
+    );
+    const discountAmount = discount ? parseFloat(discount) || 0 : 0;
     return subtotal - discountAmount;
   };
 
@@ -119,11 +129,6 @@ function Returns() {
         totalAmount: calculateTotal(selectedMedicines, discount),
         paymentType,
         paidAmount: parseFloat(paidAmount) || 0,
-        creditAmount:
-          paymentType === "partiallyPaid"
-            ? calculateTotal(selectedMedicines, discount) -
-              (parseFloat(paidAmount) || 0)
-            : 0,
         saleDate: saleData.saleDate,
         seller: saleData.seller,
         lastUpdated: new Date().toISOString(),
@@ -132,14 +137,14 @@ function Returns() {
       batch.set(saleRef, updatedSaleData);
 
       const stockUpdates = await Promise.all(
-        saleData.medicines.map(async (originalMed) => {
+        (saleData.medicines || []).map(async (originalMed) => {
           const stockRef = doc(db, "Stock", originalMed.id);
           const stockDoc = await getDoc(stockRef);
           if (!stockDoc.exists())
             throw new Error(`Stock item ${originalMed.id} not found`);
 
           const currentMed = selectedMedicines.find(
-            (m) => m.id === originalMed.id
+            (m) => m.id === originalMed.id,
           );
           const returnedQuantity = currentMed
             ? originalMed.quantity - currentMed.quantity
@@ -147,9 +152,9 @@ function Returns() {
 
           return {
             ref: stockRef,
-            quantity: stockDoc.data().quantity + returnedQuantity,
+            quantity: (stockDoc.data().quantity || 0) + returnedQuantity,
           };
-        })
+        }),
       );
 
       stockUpdates.forEach(({ ref, quantity }) => {
@@ -162,12 +167,7 @@ function Returns() {
       await batch.commit();
       setSuccess("Return processed successfully!");
       setError("");
-      setSaleData(null);
-      setSelectedMedicines([]);
-      setPatient({ name: "", age: "", gender: "", address: "", phone: "" });
-      setDiscount("");
-      setPaidAmount("");
-      setBillNumber("");
+      resetForm();
     } catch (err) {
       setError("Error processing return: " + err.message);
       setSuccess("");
@@ -188,18 +188,17 @@ function Returns() {
       const batch = writeBatch(db);
       const saleRef = doc(db, "Sales", saleData.id);
 
-      // Restore stock for all medicines in the bill
       const stockUpdates = await Promise.all(
-        saleData.medicines.map(async (med) => {
+        (saleData.medicines || []).map(async (med) => {
           const stockRef = doc(db, "Stock", med.id);
           const stockDoc = await getDoc(stockRef);
           if (!stockDoc.exists())
             throw new Error(`Stock item ${med.id} not found`);
           return {
             ref: stockRef,
-            quantity: stockDoc.data().quantity + med.quantity,
+            quantity: (stockDoc.data().quantity || 0) + (med.quantity || 0),
           };
-        })
+        }),
       );
 
       stockUpdates.forEach(({ ref, quantity }) => {
@@ -209,23 +208,26 @@ function Returns() {
         });
       });
 
-      // Delete the sale document
       batch.delete(saleRef);
 
       await batch.commit();
       setSuccess("Bill deleted successfully!");
       setError("");
-      setSaleData(null);
-      setSelectedMedicines([]);
-      setPatient({ name: "", age: "", gender: "", address: "", phone: "" });
-      setDiscount("");
-      setPaidAmount("");
-      setBillNumber("");
+      resetForm();
       setOpenDeleteDialog(false);
     } catch (err) {
       setError("Error deleting bill: " + err.message);
       setSuccess("");
     }
+  };
+
+  const resetForm = () => {
+    setSaleData(null);
+    setSelectedMedicines([]);
+    setPatient({ name: "", age: "", gender: "", address: "", phone: "" });
+    setDiscount("");
+    setPaidAmount("");
+    setBillNumber("");
   };
 
   return (
@@ -320,7 +322,7 @@ function Returns() {
               </Typography>
               <TextField
                 label="Name"
-                value={patient.name}
+                value={patient.name || ""}
                 onChange={(e) =>
                   setPatient({ ...patient, name: e.target.value })
                 }
@@ -329,10 +331,10 @@ function Returns() {
               />
               <TextField
                 label="Age"
-                value={patient.age}
+                value={patient.age || ""}
                 onChange={(e) =>
                   validateNumericInput(e.target.value, (val) =>
-                    setPatient({ ...patient, age: val })
+                    setPatient({ ...patient, age: val }),
                   )
                 }
                 fullWidth
@@ -340,7 +342,7 @@ function Returns() {
               />
               <TextField
                 label="Gender"
-                value={patient.gender}
+                value={patient.gender || ""}
                 onChange={(e) =>
                   setPatient({ ...patient, gender: e.target.value })
                 }
@@ -349,7 +351,7 @@ function Returns() {
               />
               <TextField
                 label="Address"
-                value={patient.address}
+                value={patient.address || ""}
                 onChange={(e) =>
                   setPatient({ ...patient, address: e.target.value })
                 }
@@ -358,7 +360,7 @@ function Returns() {
               />
               <TextField
                 label="Phone"
-                value={patient.phone}
+                value={patient.phone || ""}
                 onChange={(e) =>
                   setPatient({ ...patient, phone: e.target.value })
                 }
@@ -458,12 +460,10 @@ function Returns() {
       <Dialog
         open={openDeleteDialog}
         onClose={() => setOpenDeleteDialog(false)}
-        aria-labelledby="delete-dialog-title"
-        aria-describedby="delete-dialog-description"
       >
-        <DialogTitle id="delete-dialog-title">Confirm Delete Bill</DialogTitle>
+        <DialogTitle>Confirm Delete Bill</DialogTitle>
         <DialogContent>
-          <DialogContentText id="delete-dialog-description">
+          <DialogContentText>
             Are you sure you want to delete this bill? This action will remove
             the sale record and restore all associated stock quantities. This
             cannot be undone.
@@ -481,14 +481,6 @@ function Returns() {
           </Button>
         </DialogActions>
       </Dialog>
-
-      <style>{`
-        @keyframes fadeIn {
-          from { opacity: 0; }
-          to { opacity: 1; }
-        }
-        .MuiBox-root { animation: fadeIn 1s ease-in; }
-      `}</style>
     </Container>
   );
 }

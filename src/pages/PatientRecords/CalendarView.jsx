@@ -1,248 +1,254 @@
+// src/pages/PatientRecords/CalendarView.jsx
 import React, { useState } from "react";
-import { Box, Typography, IconButton, Fade, Tooltip } from "@mui/material";
 import {
-  ArrowBackIosNew as ArrowBackIcon,
-  ArrowForwardIos as ArrowForwardIcon,
+  Box,
+  Paper,
+  Typography,
+  IconButton,
+  Grid,
+  Chip,
+  alpha,
+  useTheme,
+} from "@mui/material";
+import {
+  ChevronLeft as ChevronLeftIcon,
+  ChevronRight as ChevronRightIcon,
   Today as TodayIcon,
 } from "@mui/icons-material";
 import moment from "moment";
 
-const CalendarView = ({
-  patients = [], // Default to empty array
-  onSelectDate,
-  selectedDate,
-  width = 260,
-}) => {
-  const [currentMonth, setCurrentMonth] = useState(moment());
+const CalendarView = ({ onSelectDate, selectedDate }) => {
+  const theme = useTheme();
+  const [currentMonth, setCurrentMonth] = useState(
+    moment(selectedDate).startOf("month"),
+  );
 
-  const getDaysInMonth = () => {
-    const startOfMonth = currentMonth.clone().startOf("month").startOf("week");
-    const endOfMonth = currentMonth.clone().endOf("month").endOf("week");
-    const days = [];
-    let day = startOfMonth.clone();
-    while (day.isSameOrBefore(endOfMonth, "day")) {
-      days.push(day.clone());
-      day.add(1, "day");
-    }
-    return days;
+  const daysInMonth = currentMonth.daysInMonth();
+  const startDay = currentMonth.startOf("month").day();
+  const today = moment().format("YYYY-MM-DD");
+  const selected = moment(selectedDate).format("YYYY-MM-DD");
+
+  const handlePrevMonth = () => {
+    setCurrentMonth(moment(currentMonth).subtract(1, "month"));
   };
 
-  const getPatientCountForDate = (date) => {
-    if (!patients || !Array.isArray(patients)) {
-      return 0; // Return 0 if patients is not an array
-    }
-    const dateStr = date.format("YYYY-MM-DD");
-    return patients.filter((p) => p.appointmentDate === dateStr).length;
+  const handleNextMonth = () => {
+    setCurrentMonth(moment(currentMonth).add(1, "month"));
   };
 
-  const daysOfWeek = moment.weekdaysShort();
-
-  const goToToday = () => {
-    setCurrentMonth(moment());
-    onSelectDate(moment());
+  const handleToday = () => {
+    const today = moment();
+    setCurrentMonth(today.startOf("month"));
+    onSelectDate(today);
   };
+
+  const handleDateClick = (day) => {
+    const date = moment(currentMonth).date(day);
+    onSelectDate(date);
+  };
+
+  const weekDays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+  // Generate calendar days
+  const calendarDays = [];
+  for (let i = 0; i < startDay; i++) {
+    calendarDays.push(null); // Empty cells before first day
+  }
+  for (let i = 1; i <= daysInMonth; i++) {
+    calendarDays.push(i);
+  }
 
   return (
-    <Box
+    <Paper
+      elevation={0}
       sx={{
-        width: width,
-        p: 1.5,
-        bgcolor: "background.paper",
+        p: 2,
         borderRadius: 2,
-        boxShadow: "0 4px 16px rgba(0,0,0,0.08)",
-        border: "1px solid",
-        borderColor: "divider",
-        transition: "all 0.3s ease",
-        "&:hover": {
-          boxShadow: "0 6px 20px rgba(0,0,0,0.12)",
-        },
+        border: `1px solid ${alpha(theme.palette.divider, 0.1)}`,
+        background: alpha(theme.palette.background.paper, 0.9),
+        backdropFilter: "blur(10px)",
+        maxWidth: 350,
       }}
     >
-      {/* Header with Month Navigation */}
+      {/* Header */}
       <Box
-        display="flex"
-        justifyContent="space-between"
-        alignItems="center"
-        mb={1.5}
         sx={{
-          pb: 1,
-          borderBottom: "1px solid",
-          borderColor: "primary.main",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          mb: 2,
         }}
       >
-        <Box display="flex" alignItems="center" gap={2} p={2}>
+        <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
           <IconButton
             size="small"
-            onClick={() =>
-              setCurrentMonth(currentMonth.clone().subtract(1, "month"))
-            }
+            onClick={handlePrevMonth}
             sx={{
-              p: 0.5,
-              borderRadius: 1,
-              bgcolor: "action.hover",
-              "&:hover": { bgcolor: "primary.light", color: "white" },
-              transition: "all 0.2s ease",
+              bgcolor: alpha(theme.palette.primary.main, 0.1),
+              "&:hover": { bgcolor: alpha(theme.palette.primary.main, 0.2) },
             }}
           >
-            <ArrowBackIcon fontSize="small" />
+            <ChevronLeftIcon fontSize="small" />
           </IconButton>
           <Typography
-            variant="body2"
-            fontWeight="600"
-            sx={{
-              minWidth: 100,
-              textAlign: "center",
-              color: "primary.main",
-              fontSize: "0.8rem",
-              letterSpacing: "0.3px",
-            }}
+            variant="subtitle1"
+            fontWeight="bold"
+            sx={{ minWidth: 140, textAlign: "center" }}
           >
-            {currentMonth.format("MMM YYYY")}
+            {currentMonth.format("MMMM YYYY")}
           </Typography>
           <IconButton
             size="small"
-            onClick={() =>
-              setCurrentMonth(currentMonth.clone().add(1, "month"))
-            }
+            onClick={handleNextMonth}
             sx={{
-              p: 0.5,
-              borderRadius: 1,
-              bgcolor: "action.hover",
-              "&:hover": { bgcolor: "primary.light", color: "white" },
-              transition: "all 0.2s ease",
+              bgcolor: alpha(theme.palette.primary.main, 0.1),
+              "&:hover": { bgcolor: alpha(theme.palette.primary.main, 0.2) },
             }}
           >
-            <ArrowForwardIcon fontSize="small" />
+            <ChevronRightIcon fontSize="small" />
           </IconButton>
         </Box>
-        <Tooltip title="Go to Today" arrow>
-          <IconButton
-            size="small"
-            onClick={goToToday}
-            sx={{
-              p: 0.5,
-              borderRadius: "50%",
-              bgcolor: "primary.main",
-              color: "white",
-              "&:hover": { bgcolor: "primary.dark" },
-              transition: "all 0.2s ease",
-            }}
-          >
-            <TodayIcon fontSize="small" />
-          </IconButton>
-        </Tooltip>
+        <Chip
+          icon={<TodayIcon sx={{ fontSize: 14 }} />}
+          label="Today"
+          size="small"
+          onClick={handleToday}
+          sx={{
+            cursor: "pointer",
+            bgcolor: alpha(theme.palette.primary.main, 0.1),
+            color: theme.palette.primary.main,
+            fontWeight: 600,
+            fontSize: "0.75rem",
+            "&:hover": { bgcolor: alpha(theme.palette.primary.main, 0.2) },
+          }}
+        />
       </Box>
-      {/* Days of Week Header */}
-      <Box
-        display="grid"
-        gridTemplateColumns="repeat(7, 1fr)"
-        gap={0.5}
-        mb={0.5}
-      >
-        {daysOfWeek.map((dayName) => (
-          <Typography
-            key={dayName}
-            variant="caption"
-            sx={{
-              textAlign: "center",
-              fontWeight: 700,
-              fontSize: "0.65rem",
-              color: "text.secondary",
-              textTransform: "uppercase",
-              py: 0.5,
-            }}
-          >
-            {dayName.charAt(0)} {}
-          </Typography>
+
+      {/* Week Days */}
+      <Grid container spacing={0.5} sx={{ mb: 0.5 }}>
+        {weekDays.map((day) => (
+          <Grid item xs={12 / 7} key={day}>
+            <Typography
+              variant="caption"
+              sx={{
+                display: "block",
+                textAlign: "center",
+                fontWeight: 600,
+                color: theme.palette.text.secondary,
+                fontSize: "0.7rem",
+                py: 0.5,
+              }}
+            >
+              {day}
+            </Typography>
+          </Grid>
         ))}
-      </Box>
-      {/* Calendar Days Grid */}
-      <Box display="grid" gridTemplateColumns="repeat(7, 1fr)" gap={0.5}>
-        {getDaysInMonth().map((day, i) => {
-          const patientCount = getPatientCountForDate(day);
-          const isCurrentMonth = day.month() === currentMonth.month();
-          const isSelected = selectedDate && day.isSame(selectedDate, "day");
-          const isToday = day.isSame(moment(), "day");
-          return (
-            <Fade in timeout={50 + i * 10} key={i}>
+      </Grid>
+
+      {/* Days */}
+      <Grid container spacing={0.5}>
+        {calendarDays.map((day, index) => (
+          <Grid item xs={12 / 7} key={index}>
+            {day ? (
               <Box
+                onClick={() => handleDateClick(day)}
                 sx={{
-                  position: "relative",
                   display: "flex",
-                  flexDirection: "column",
-                  justifyContent: "center",
                   alignItems: "center",
-                  height: 28,
-                  minWidth: 28,
-                  borderRadius: 1,
-                  backgroundColor: isSelected
-                    ? "primary.main"
-                    : isToday
-                    ? "primary.light"
-                    : "transparent",
+                  justifyContent: "center",
+                  height: 32,
+                  borderRadius: "50%",
+                  cursor: "pointer",
+                  fontSize: "0.8rem",
+                  fontWeight:
+                    selected ===
+                    moment(currentMonth).date(day).format("YYYY-MM-DD")
+                      ? 700
+                      : 400,
                   color:
-                    isSelected || isToday
-                      ? "white"
-                      : !isCurrentMonth
-                      ? "text.disabled"
-                      : "text.primary",
-                  border:
-                    isToday && !isSelected
-                      ? "1px solid"
-                      : "1px solid transparent",
-                  borderColor:
-                    isToday && !isSelected ? "primary.main" : "transparent",
-                  cursor: isCurrentMonth ? "pointer" : "default",
-                  transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)",
-                  transform: isSelected ? "scale(1.1)" : "scale(1)",
-                  "&:hover": isCurrentMonth
-                    ? {
-                        bgcolor: isSelected ? "primary.dark" : "primary.light",
-                        color: "white",
-                        transform: "scale(1.15)",
-                        boxShadow: "0 2px 6px rgba(0,0,0,0.1)",
-                      }
-                    : {},
+                    selected ===
+                    moment(currentMonth).date(day).format("YYYY-MM-DD")
+                      ? "#fff"
+                      : today ===
+                          moment(currentMonth).date(day).format("YYYY-MM-DD")
+                        ? theme.palette.primary.main
+                        : theme.palette.text.primary,
+                  bgcolor:
+                    selected ===
+                    moment(currentMonth).date(day).format("YYYY-MM-DD")
+                      ? theme.palette.primary.main
+                      : today ===
+                          moment(currentMonth).date(day).format("YYYY-MM-DD")
+                        ? alpha(theme.palette.primary.main, 0.1)
+                        : "transparent",
+                  transition: "all 0.2s ease",
+                  "&:hover": {
+                    bgcolor:
+                      selected ===
+                      moment(currentMonth).date(day).format("YYYY-MM-DD")
+                        ? theme.palette.primary.dark
+                        : alpha(theme.palette.primary.main, 0.1),
+                    transform: "scale(1.1)",
+                  },
                 }}
-                onClick={() => isCurrentMonth && onSelectDate(day)}
               >
-                <Typography
-                  variant="body2"
-                  sx={{
-                    fontSize: "0.7rem",
-                    fontWeight: isToday ? 700 : 400,
-                  }}
-                >
-                  {day.date()}
-                </Typography>
-                {patientCount > 0 && (
-                  <Box
-                    sx={{
-                      position: "absolute",
-                      top: 1,
-                      right: 1,
-                      minWidth: 12,
-                      height: 12,
-                      borderRadius: "50%",
-                      bgcolor: isSelected || isToday ? "white" : "error.main",
-                      color: isSelected || isToday ? "error.main" : "white",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      fontSize: "0.5rem",
-                      fontWeight: 700,
-                      lineHeight: 1,
-                    }}
-                  >
-                    {patientCount > 9 ? "+" : patientCount}
-                  </Box>
-                )}
+                {day}
               </Box>
-            </Fade>
-          );
-        })}
+            ) : (
+              <Box sx={{ height: 32 }} />
+            )}
+          </Grid>
+        ))}
+      </Grid>
+
+      {/* Quick Select */}
+      <Box sx={{ display: "flex", gap: 0.5, mt: 2, flexWrap: "wrap" }}>
+        <Chip
+          label="Yesterday"
+          size="small"
+          onClick={() => {
+            const yesterday = moment().subtract(1, "days");
+            setCurrentMonth(yesterday.startOf("month"));
+            onSelectDate(yesterday);
+          }}
+          sx={{
+            cursor: "pointer",
+            fontSize: "0.7rem",
+            height: 24,
+          }}
+          variant="outlined"
+        />
+        <Chip
+          label="Tomorrow"
+          size="small"
+          onClick={() => {
+            const tomorrow = moment().add(1, "days");
+            setCurrentMonth(tomorrow.startOf("month"));
+            onSelectDate(tomorrow);
+          }}
+          sx={{
+            cursor: "pointer",
+            fontSize: "0.7rem",
+            height: 24,
+          }}
+          variant="outlined"
+        />
+        <Chip
+          label="This Week"
+          size="small"
+          onClick={() => {
+            const startOfWeek = moment().startOf("week");
+            onSelectDate(startOfWeek);
+          }}
+          sx={{
+            cursor: "pointer",
+            fontSize: "0.7rem",
+            height: 24,
+          }}
+          variant="outlined"
+        />
       </Box>
-    </Box>
+    </Paper>
   );
 };
 
