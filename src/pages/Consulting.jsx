@@ -62,19 +62,19 @@ import {
   getDocs,
   doc,
   updateDoc,
-  onSnapshot,
   deleteDoc,
   where,
   query,
   orderBy,
+  onSnapshot,
 } from "firebase/firestore";
+import { appCache, CACHE_KEYS, cacheEvents } from "../utils/appCache";
 
 // ---------------------------------------------------------------------------
-// Helper: Extract latest visit data (client-side, no additional Firestore reads)
+// Helper: Extract latest visit data
 // ---------------------------------------------------------------------------
 const getLatestVisitData = (patient) => {
   if (!patient) return {};
-
   if (patient.pastVisits && patient.pastVisits.length > 0) {
     const latestVisit = patient.pastVisits[patient.pastVisits.length - 1];
     return {
@@ -91,7 +91,6 @@ const getLatestVisitData = (patient) => {
       testResults: latestVisit.testResults || patient.testResults || {},
     };
   }
-
   return {
     diagnosis: patient.diagnoses?.[patient.diagnoses.length - 1]?.text || "",
     tests: patient.prescribedTests || [],
@@ -138,9 +137,7 @@ const StyledTabs = styled(Tabs)(({ theme }) => ({
       boxShadow: "0 2px 8px rgba(0, 0, 0, 0.12)",
     },
   },
-  "& .MuiTabs-indicator": {
-    display: "none",
-  },
+  "& .MuiTabs-indicator": { display: "none" },
 }));
 
 const getStatusColor = (theme, status) => {
@@ -184,12 +181,8 @@ const StatusChip = styled(Chip, {
     fontSize: "0.75rem",
     height: "28px",
     transition: "all 0.2s ease",
-    "& .MuiChip-icon": {
-      fontSize: "16px",
-    },
-    "&:hover": {
-      backgroundColor: alpha(color, 0.2),
-    },
+    "& .MuiChip-icon": { fontSize: "16px" },
+    "&:hover": { backgroundColor: alpha(color, 0.2) },
   };
 });
 
@@ -228,7 +221,6 @@ const StatCard = styled(Paper)(({ theme, color = "primary" }) => ({
 const Consulting = ({ userRole }) => {
   const theme = useTheme();
 
-  // State management
   const [loading, setLoading] = useState(true);
   const [allPatients, setAllPatients] = useState([]);
   const [labTests, setLabTests] = useState([]);
@@ -249,82 +241,185 @@ const Consulting = ({ userRole }) => {
   const ticketRef = useRef();
 
   // ---------------------------------------------------------------------------
-  // Data Fetching (Optimized with parallel reads)
+  // Data Fetching - USES SHARED CACHE (NO DUPLICATE LISTENERS)
   // ---------------------------------------------------------------------------
+  // Initial data fetch
   useEffect(() => {
     const fetchInitialData = async () => {
       try {
-        // Fetch doctors, lab tests, and medicines in parallel
-        const [doctorsSnapshot, labTestsSnapshot, medicinesSnapshot] =
-          await Promise.all([
-            getDocs(collection(db, "Doctors")),
-            getDocs(collection(db, "labTests")),
-            getDocs(collection(db, "Stock")),
-          ]);
-
-        // Process doctors
-        const doctorMap = {};
-        doctorsSnapshot.forEach((doc) => {
-          doctorMap[doc.id] = doc.data();
-        });
+        // Doctors
+        const doctorMap = await appCache.getDoctors();
         setDoctors(doctorMap);
 
-        // Process lab tests
+        // Lab tests
+        const labTestsSnapshot = await getDocs(collection(db, "labTests"));
         setLabTests(
           labTestsSnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })),
         );
 
-        // Process medicines
-        setMedicines(
-          medicinesSnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })),
-        );
+        // Medicines - use cached immediately
+        const cachedStock = appCache.getCachedStock();
+        if (cachedStock && cachedStock.length > 0) {
+          setMedicines(cachedStock);
+        }
+
+        // Subscribe for updates
+        const unsubStock = cacheEvents.on(CACHE_KEYS.STOCK, (data) => {
+          if (data && data.length > 0) {
+            setMedicines(data);
+          }
+        });
+
+        return () => {
+          if (unsubStock) unsubStock();
+        };
       } catch (err) {
-        console.error("Error fetching initial data:", err);
-        setError("Failed to load necessary data. Please refresh.");
+        console.error("Error:", err);
+        setLoading(false);
       }
     };
     fetchInitialData();
   }, []);
 
-  // Real-time patient queue listener (WITH orderBy using index)
+  // Patient Queue - with historical date support and real-time updates for today
   useEffect(() => {
     if (!calendarDate) return;
 
+    let timeout;
+    let unsubscribe;
+    let isSubscribed = true;
+
+    // ALWAYS set loading to false after 3 seconds max
+    timeout = setTimeout(() => {
+      if (isSubscribed) setLoading(false);
+    }, 3000);
+
     const dateStr = calendarDate.format("YYYY-MM-DD");
-    const q = query(
-      collection(db, "Patients"),
-      where("appointmentDate", "==", dateStr),
-      where("status", "in", [
-        "waiting",
-        "waiting-for-results",
-        "in-progress",
-        "test-completed",
-      ]),
-      orderBy("createdAt", "asc"),
-    );
+    const todayStr = moment().format("YYYY-MM-DD");
 
-    const unsubscribe = onSnapshot(
-      q,
-      (snapshot) => {
-        const patientsData = snapshot.docs.map((doc) => ({
-          id: doc.id,
-          ...doc.data(),
-        }));
-        setAllPatients(patientsData);
-        setLoading(false);
-        setLastUpdate(moment());
-      },
-      (err) => {
-        console.error("Error fetching patients:", err);
-        setError("Failed to load patient queue. Check your connection.");
-        setLoading(false);
-      },
-    );
+    // For today's date, try cache first and subscribe to updates
+    if (dateStr === todayStr) {
+      // Try cache first for immediate display
+      const cached = appCache.getCachedPatients?.() || [];
+      if (cached.length > 0) {
+        const todaysPatients = cached.filter(
+          (p) => p.appointmentDate === dateStr,
+        );
+        if (todaysPatients.length > 0 && isSubscribed) {
+          setAllPatients(todaysPatients);
+          setLoading(false);
+          clearTimeout(timeout);
+        }
+      }
 
-    return () => unsubscribe();
+      // Subscribe to shared cache for real-time updates
+      unsubscribe = cacheEvents.on(CACHE_KEYS.PATIENT_QUEUE, (data) => {
+        if (data && isSubscribed) {
+          const filteredData = data.filter(
+            (p) => p.appointmentDate === dateStr,
+          );
+          setAllPatients(filteredData);
+          setLoading(false);
+          setLastUpdate(moment());
+          clearTimeout(timeout);
+        }
+      });
+
+      // Fallback direct fetch for today
+      setTimeout(async () => {
+        if (isSubscribed && allPatients.length === 0) {
+          try {
+            const q = query(
+              collection(db, "Patients"),
+              where("appointmentDate", "==", dateStr),
+              where("status", "in", [
+                "waiting",
+                "waiting-for-results",
+                "in-progress",
+                "test-completed",
+              ]),
+              orderBy("createdAt", "asc"),
+            );
+            const snapshot = await getDocs(q);
+            const data = snapshot.docs.map((doc) => ({
+              id: doc.id,
+              ...doc.data(),
+            }));
+            if (data.length > 0 && isSubscribed) {
+              setAllPatients(data);
+              setLoading(false);
+              clearTimeout(timeout);
+            }
+          } catch (e) {
+            console.error("Fallback fetch error:", e);
+          }
+        }
+      }, 2000);
+    } else {
+      // For historical/future dates, fetch directly from Firestore
+      const fetchHistoricalPatients = async () => {
+        try {
+          setLoading(true);
+          const q = query(
+            collection(db, "Patients"),
+            where("appointmentDate", "==", dateStr),
+            orderBy("createdAt", "asc"),
+          );
+
+          const snapshot = await getDocs(q);
+          const data = snapshot.docs.map((doc) => ({
+            id: doc.id,
+            ...doc.data(),
+          }));
+
+          if (isSubscribed) {
+            setAllPatients(data);
+            setLoading(false);
+            setLastUpdate(moment());
+            clearTimeout(timeout);
+          }
+        } catch (err) {
+          console.error("Error fetching historical patients:", err);
+          if (isSubscribed) {
+            // If index doesn't exist yet, try without ordering
+            try {
+              const q = query(
+                collection(db, "Patients"),
+                where("appointmentDate", "==", dateStr),
+              );
+              const snapshot = await getDocs(q);
+              const data = snapshot.docs.map((doc) => ({
+                id: doc.id,
+                ...doc.data(),
+              }));
+              if (isSubscribed) {
+                setAllPatients(data);
+                setLoading(false);
+                clearTimeout(timeout);
+              }
+            } catch (fallbackErr) {
+              console.error("Fallback fetch error:", fallbackErr);
+              if (isSubscribed) {
+                setAllPatients([]);
+                setLoading(false);
+                clearTimeout(timeout);
+              }
+            }
+          }
+        }
+      };
+
+      fetchHistoricalPatients();
+    }
+
+    return () => {
+      isSubscribed = false;
+      if (unsubscribe) unsubscribe();
+      clearTimeout(timeout);
+    };
   }, [calendarDate]);
 
-  // Real-time today's earnings listener (WITHOUT orderBy - client-side sort)
+  // Today's earnings - keep this listener (different query from shared cache)
   useEffect(() => {
     const todayStr = moment().format("YYYY-MM-DD");
 
@@ -344,7 +439,6 @@ const Consulting = ({ userRole }) => {
             amount: parseFloat(p.discountedPrice ?? p.opdPrice ?? 0) || 0,
           }))
           .sort((a, b) => (a.createdAt || "").localeCompare(b.createdAt || ""));
-
         setEarningPatients(records);
         setEarningLoading(false);
       },
@@ -376,7 +470,6 @@ const Consulting = ({ userRole }) => {
     const pendingCount = earningPatients.length - paidCount;
     const averageAmount =
       earningPatients.length > 0 ? total / earningPatients.length : 0;
-
     return {
       total,
       count: earningPatients.length,
@@ -386,7 +479,6 @@ const Consulting = ({ userRole }) => {
     };
   }, [earningPatients]);
 
-  // Prepare print data
   const patientForPrint = printPatient || viewPatient;
   const visitData = getLatestVisitData(patientForPrint);
 
@@ -413,7 +505,7 @@ const Consulting = ({ userRole }) => {
   const handleDelete = useCallback(async (id) => {
     if (
       window.confirm(
-        "Are you sure you want to delete this patient record permanently? This action cannot be undone.",
+        "Are you sure you want to delete this patient record permanently?",
       )
     ) {
       try {
@@ -451,10 +543,14 @@ const Consulting = ({ userRole }) => {
   }, []);
 
   const handleRefresh = useCallback(() => {
-    setLoading(true);
-    setTimeout(() => setLoading(false), 1000);
-    setSuccess("Data refreshed successfully");
-  }, []);
+    // Force re-fetch by toggling calendar date
+    const currentDate = calendarDate.clone();
+    setCalendarDate(moment("2000-01-01")); // Temporary date to trigger re-fetch
+    setTimeout(() => {
+      setCalendarDate(currentDate);
+      setSuccess("Data refreshed successfully");
+    }, 100);
+  }, [calendarDate]);
 
   // ---------------------------------------------------------------------------
   // Loading State
@@ -475,15 +571,12 @@ const Consulting = ({ userRole }) => {
         <Typography variant="h6" color="textSecondary">
           Loading Patient Records...
         </Typography>
-        <Typography variant="body2" color="textSecondary">
-          Please wait while we fetch the latest data
-        </Typography>
       </Box>
     );
   }
 
   // ---------------------------------------------------------------------------
-  // Consultation View (Full Screen)
+  // Consultation View
   // ---------------------------------------------------------------------------
   if (selectedPatient) {
     return (
@@ -503,11 +596,11 @@ const Consulting = ({ userRole }) => {
   }
 
   // ---------------------------------------------------------------------------
-  // Main Dashboard View
+  // Main Dashboard
   // ---------------------------------------------------------------------------
   return (
     <ModernPaper elevation={0}>
-      {/* Header Section */}
+      {/* Header */}
       <Box
         display="flex"
         alignItems="center"
@@ -531,7 +624,6 @@ const Consulting = ({ userRole }) => {
             </Tooltip>
           </Box>
         </Box>
-
         <Box display="flex" gap={1} alignItems="center">
           <Tooltip title="Refresh data">
             <IconButton onClick={handleRefresh} size="small" color="primary">
@@ -540,24 +632,15 @@ const Consulting = ({ userRole }) => {
           </Tooltip>
           <Chip
             icon={<AccessTimeIcon />}
-            label={`${filteredPatients.length} Active`}
+            label={`${filteredPatients.length} Patients`}
             variant="outlined"
             color="primary"
             size="small"
           />
-          {earningsData.count > 0 && (
-            <Chip
-              icon={<AttachMoneyIcon />}
-              label={`NPR ${earningsData.total.toLocaleString()}`}
-              variant="outlined"
-              color="success"
-              size="small"
-            />
-          )}
         </Box>
       </Box>
 
-      {/* Tab Navigation */}
+      {/* Tabs */}
       <Box sx={{ mb: 3 }}>
         <StyledTabs
           value={activeTab}
@@ -587,7 +670,6 @@ const Consulting = ({ userRole }) => {
       {/* Patient Queue Tab */}
       <Fade in={activeTab === 0} mountOnEnter unmountOnExit>
         <Box>
-          {/* Quick Stats */}
           <Grid container spacing={2} mb={3}>
             <Grid item xs={6} sm={3}>
               <StatCard>
@@ -628,16 +710,15 @@ const Consulting = ({ userRole }) => {
             <Grid item xs={6} sm={3}>
               <StatCard color="success">
                 <Typography variant="caption" color="textSecondary">
-                  Today's Revenue
+                  Completed
                 </Typography>
                 <Typography variant="h6" fontWeight="bold" color="success.main">
-                  NPR {earningsData.total.toLocaleString()}
+                  {allPatients.filter((p) => p.status === "completed").length}
                 </Typography>
               </StatCard>
             </Grid>
           </Grid>
 
-          {/* Filter Controls */}
           <Grid container spacing={2} alignItems="center" mb={3}>
             <Grid item xs={12} md={8}>
               <FilterControls
@@ -659,11 +740,7 @@ const Consulting = ({ userRole }) => {
                 startIcon={<CalendarIcon />}
                 onClick={() => setShowCalendar(!showCalendar)}
                 size="medium"
-                sx={{
-                  borderRadius: 2,
-                  textTransform: "none",
-                  px: 2,
-                }}
+                sx={{ borderRadius: 2, textTransform: "none", px: 2 }}
               >
                 {calendarDate.format("MMM D, YYYY")}
               </Button>
@@ -674,11 +751,7 @@ const Consulting = ({ userRole }) => {
                   onClick={clearFilters}
                   size="medium"
                   color="error"
-                  sx={{
-                    borderRadius: 2,
-                    textTransform: "none",
-                    px: 2,
-                  }}
+                  sx={{ borderRadius: 2, textTransform: "none", px: 2 }}
                 >
                   Clear
                 </Button>
@@ -686,7 +759,6 @@ const Consulting = ({ userRole }) => {
             </Grid>
           </Grid>
 
-          {/* Calendar View */}
           <Zoom in={showCalendar}>
             <Box sx={{ mb: 3 }}>
               {showCalendar && (
@@ -701,7 +773,6 @@ const Consulting = ({ userRole }) => {
             </Box>
           </Zoom>
 
-          {/* Patient List */}
           <PatientList
             patients={filteredPatients}
             isWaitingList={true}
@@ -719,7 +790,6 @@ const Consulting = ({ userRole }) => {
       {/* Earnings Tab */}
       <Fade in={activeTab === 1} mountOnEnter unmountOnExit>
         <Box>
-          {/* Main Earning Card */}
           <EarningCard elevation={0}>
             <Box display="flex" alignItems="center" gap={2}>
               <Box
@@ -754,7 +824,6 @@ const Consulting = ({ userRole }) => {
                 )}
               </Box>
             </Box>
-
             {!earningLoading && (
               <Box display="flex" gap={2} flexWrap="wrap">
                 <Chip
@@ -787,194 +856,52 @@ const Consulting = ({ userRole }) => {
             )}
           </EarningCard>
 
-          {/* Quick Stats */}
-          <Grid container spacing={2} mb={3}>
-            <Grid item xs={6} sm={4}>
-              <StatCard color="info">
-                <Typography variant="caption" color="textSecondary">
-                  Average per Visit
-                </Typography>
-                <Typography variant="h6" fontWeight="bold" color="info.main">
-                  NPR {earningsData.averageAmount.toFixed(0).toLocaleString()}
-                </Typography>
-              </StatCard>
-            </Grid>
-            <Grid item xs={6} sm={4}>
-              <StatCard color="success">
-                <Typography variant="caption" color="textSecondary">
-                  Collection Rate
-                </Typography>
-                <Typography variant="h6" fontWeight="bold" color="success.main">
-                  {earningsData.count > 0
-                    ? `${((earningsData.paidCount / earningsData.count) * 100).toFixed(0)}%`
-                    : "0%"}
-                </Typography>
-              </StatCard>
-            </Grid>
-            <Grid item xs={6} sm={4}>
-              <StatCard color="warning">
-                <Typography variant="caption" color="textSecondary">
-                  Pending Collection
-                </Typography>
-                <Typography variant="h6" fontWeight="bold" color="warning.main">
-                  NPR{" "}
-                  {earningPatients
-                    .filter((p) => p.paymentStatus !== "paid")
-                    .reduce((sum, p) => sum + p.amount, 0)
-                    .toLocaleString()}
-                </Typography>
-              </StatCard>
-            </Grid>
-          </Grid>
-
-          {/* Detailed Table */}
-          {earningLoading ? (
-            <Box display="flex" justifyContent="center" py={4}>
-              <CircularProgress size={32} />
-            </Box>
-          ) : earningPatients.length === 0 ? (
-            <Box textAlign="center" py={4}>
-              <ReceiptIcon
-                sx={{
-                  fontSize: 48,
-                  color: alpha(theme.palette.text.secondary, 0.3),
-                  mb: 2,
-                }}
-              />
-              <Typography color="textSecondary">
-                No billed visits recorded for today yet.
-              </Typography>
-              <Typography variant="caption" color="textSecondary">
-                New patient registrations will appear here automatically.
-              </Typography>
-            </Box>
-          ) : (
-            <TableContainer
-              component={Paper}
-              elevation={0}
-              sx={{
-                border: `1px solid ${alpha(theme.palette.divider, 0.15)}`,
-                borderRadius: 2,
-                overflow: "hidden",
-              }}
-            >
+          {/* Earnings Table */}
+          {!earningLoading && earningPatients.length > 0 && (
+            <TableContainer component={Paper} sx={{ borderRadius: 2, mb: 3 }}>
               <Table size="small">
                 <TableHead>
-                  <TableRow
-                    sx={{
-                      backgroundColor: alpha(theme.palette.primary.main, 0.04),
-                    }}
-                  >
-                    <TableCell sx={{ fontWeight: 700 }}>#</TableCell>
-                    <TableCell sx={{ fontWeight: 700 }}>Bill No</TableCell>
-                    <TableCell sx={{ fontWeight: 700 }}>Patient</TableCell>
-                    <TableCell sx={{ fontWeight: 700 }}>Doctor</TableCell>
-                    <TableCell sx={{ fontWeight: 700 }} align="right">
-                      OPD Price
-                    </TableCell>
-                    <TableCell sx={{ fontWeight: 700 }} align="right">
-                      Discount
-                    </TableCell>
-                    <TableCell sx={{ fontWeight: 700 }} align="right">
-                      Amount (NPR)
-                    </TableCell>
-                    <TableCell sx={{ fontWeight: 700 }}>Payment</TableCell>
-                    <TableCell sx={{ fontWeight: 700 }}>Status</TableCell>
+                  <TableRow>
+                    <TableCell sx={{ fontWeight: 600 }}>Patient</TableCell>
+                    <TableCell sx={{ fontWeight: 600 }}>Amount (NPR)</TableCell>
+                    <TableCell sx={{ fontWeight: 600 }}>Payment</TableCell>
+                    <TableCell sx={{ fontWeight: 600 }}>Status</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {earningPatients.map((p, i) => (
-                    <TableRow
-                      key={p.id}
-                      hover
-                      sx={{
-                        "&:hover": {
-                          backgroundColor: alpha(
-                            theme.palette.primary.main,
-                            0.02,
-                          ),
-                        },
-                      }}
-                    >
-                      <TableCell>{i + 1}</TableCell>
-                      <TableCell>
-                        <Typography variant="body2" fontWeight="medium">
-                          {p.billNo}
-                        </Typography>
-                      </TableCell>
-                      <TableCell>
-                        <Typography variant="body2">{p.name}</Typography>
-                        {p.phone && (
-                          <Typography variant="caption" color="textSecondary">
-                            {p.phone}
-                          </Typography>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        {doctors[p.doctorId]?.nameEnglish || "—"}
-                      </TableCell>
-                      <TableCell align="right">
-                        {parseFloat(p.opdPrice || 0).toLocaleString("en-IN")}
-                      </TableCell>
-                      <TableCell align="right">
-                        {p.discount && Number(p.discount) > 0 ? (
-                          <Chip
-                            label={`${p.discount}%`}
-                            size="small"
-                            color="warning"
-                            variant="outlined"
-                            sx={{ height: 24 }}
-                          />
-                        ) : (
-                          "—"
-                        )}
-                      </TableCell>
-                      <TableCell align="right" sx={{ fontWeight: 600 }}>
-                        NPR {p.amount.toLocaleString("en-IN")}
-                      </TableCell>
+                  {earningPatients.map((patient) => (
+                    <TableRow key={patient.id} hover>
+                      <TableCell>{patient.name}</TableCell>
+                      <TableCell>{patient.amount.toLocaleString()}</TableCell>
                       <TableCell>
                         <Chip
-                          label={p.paymentStatus || "pending"}
+                          icon={
+                            patient.paymentStatus === "paid" ? (
+                              <CheckCircleIcon />
+                            ) : (
+                              <PendingIcon />
+                            )
+                          }
+                          label={patient.paymentStatus || "pending"}
                           size="small"
                           color={
-                            p.paymentStatus === "paid" ? "success" : "warning"
+                            patient.paymentStatus === "paid"
+                              ? "success"
+                              : "warning"
                           }
                           variant="outlined"
-                          sx={{ textTransform: "capitalize", height: 24 }}
                         />
                       </TableCell>
                       <TableCell>
                         <StatusChip
-                          icon={getStatusIcon(p.status)}
-                          label={p.status}
-                          status={p.status}
+                          icon={getStatusIcon(patient.status)}
+                          label={patient.status || "pending"}
+                          status={patient.status}
                           size="small"
                         />
                       </TableCell>
                     </TableRow>
                   ))}
-
-                  {/* Total Row */}
-                  <TableRow
-                    sx={{
-                      backgroundColor: alpha(theme.palette.success.main, 0.05),
-                      "& td": { fontWeight: 700 },
-                    }}
-                  >
-                    <TableCell colSpan={6} align="right">
-                      <Typography fontWeight="bold">Today's Total</Typography>
-                    </TableCell>
-                    <TableCell align="right">
-                      <Typography
-                        fontWeight="bold"
-                        color="success.dark"
-                        fontSize="1.1rem"
-                      >
-                        NPR {earningsData.total.toLocaleString("en-IN")}
-                      </Typography>
-                    </TableCell>
-                    <TableCell colSpan={2} />
-                  </TableRow>
                 </TableBody>
               </Table>
             </TableContainer>
@@ -990,7 +917,7 @@ const Consulting = ({ userRole }) => {
         onPrint={setPrintPatient}
       />
 
-      {/* Hidden Print Component */}
+      {/* Hidden Print */}
       <div style={{ display: "none" }}>
         <div ref={ticketRef}>
           <OPDTicket
@@ -1008,36 +935,23 @@ const Consulting = ({ userRole }) => {
         </div>
       </div>
 
-      {/* Success Notification */}
       <Snackbar
         open={!!success}
         autoHideDuration={4000}
         onClose={() => setSuccess(null)}
         anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
       >
-        <Alert
-          onClose={() => setSuccess(null)}
-          severity="success"
-          variant="filled"
-          sx={{ width: "100%" }}
-        >
+        <Alert severity="success" variant="filled">
           {success}
         </Alert>
       </Snackbar>
-
-      {/* Error Notification */}
       <Snackbar
         open={!!error}
         autoHideDuration={6000}
         onClose={() => setError(null)}
         anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
       >
-        <Alert
-          onClose={() => setError(null)}
-          severity="error"
-          variant="filled"
-          sx={{ width: "100%" }}
-        >
+        <Alert severity="error" variant="filled">
           {error}
         </Alert>
       </Snackbar>

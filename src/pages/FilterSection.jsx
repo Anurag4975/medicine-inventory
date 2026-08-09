@@ -11,8 +11,69 @@ import {
 import { LocalizationProvider } from "@mui/x-date-pickers/LocalizationProvider";
 import { AdapterDateFns } from "@mui/x-date-pickers/AdapterDateFns";
 import { DatePicker } from "@mui/x-date-pickers/DatePicker";
-import { collection, getDocs } from "firebase/firestore";
+import { collection, getDocs, query, where } from "firebase/firestore";
 import { db } from "../firebase";
+
+const getDateBounds = (filterType, selectedDate) => {
+  const now = new Date();
+
+  if (filterType === "day") {
+    return {
+      start: new Date(
+        now.getFullYear(),
+        now.getMonth(),
+        now.getDate(),
+        0,
+        0,
+        0,
+      ),
+      end: new Date(
+        now.getFullYear(),
+        now.getMonth(),
+        now.getDate(),
+        23,
+        59,
+        59,
+        999,
+      ),
+    };
+  }
+  if (filterType === "month") {
+    return {
+      start: new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0),
+      end: new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999),
+    };
+  }
+  if (filterType === "year") {
+    return {
+      start: new Date(now.getFullYear(), 0, 1, 0, 0, 0),
+      end: new Date(now.getFullYear(), 11, 31, 23, 59, 59, 999),
+    };
+  }
+  if (filterType === "custom" && selectedDate) {
+    return {
+      start: new Date(
+        selectedDate.getFullYear(),
+        selectedDate.getMonth(),
+        selectedDate.getDate(),
+        0,
+        0,
+        0,
+      ),
+      end: new Date(
+        selectedDate.getFullYear(),
+        selectedDate.getMonth(),
+        selectedDate.getDate(),
+        23,
+        59,
+        59,
+        999,
+      ),
+    };
+  }
+  // "custom" selected but no date chosen yet — nothing to scope a query to
+  return null;
+};
 
 const FilterSection = ({
   filter,
@@ -30,15 +91,25 @@ const FilterSection = ({
 }) => {
   useEffect(() => {
     const fetchSales = async () => {
+      const range = getDateBounds(filter, customDate);
+      if (!range) {
+        setSales([]);
+        setLoading(false);
+        return;
+      }
+      setLoading(true);
       try {
-        const salesCollection = collection(db, "Sales");
-        const salesSnapshot = await getDocs(salesCollection);
+        const salesQuery = query(
+          collection(db, "Sales"),
+          where("saleDate", ">=", range.start.toISOString()),
+          where("saleDate", "<=", range.end.toISOString()),
+        );
+        const salesSnapshot = await getDocs(salesQuery);
         const salesList = salesSnapshot.docs.map((doc) => ({
           id: doc.id,
           ...doc.data(),
         }));
         setSales(salesList);
-        filterSales(salesList, filter, customDate, paymentFilter, searchQuery);
       } catch (error) {
         console.error("Error fetching sales:", error);
       } finally {
@@ -46,56 +117,14 @@ const FilterSection = ({
       }
     };
     fetchSales();
-  }, []);
+  }, [filter, customDate]);
 
   useEffect(() => {
-    filterSales(sales, filter, customDate, paymentFilter, searchQuery);
-  }, [sales, filter, customDate, paymentFilter, searchQuery]);
+    filterSales(sales, paymentFilter, searchQuery);
+  }, [sales, paymentFilter, searchQuery]);
 
-  const filterSales = (
-    salesData,
-    filterType,
-    selectedDate,
-    paymentType,
-    query,
-  ) => {
-    const now = new Date();
-    let filtered = [];
-
-    if (filterType === "day") {
-      filtered = salesData.filter((sale) => {
-        const saleDate = new Date(sale.saleDate);
-        return (
-          saleDate.getDate() === now.getDate() &&
-          saleDate.getMonth() === now.getMonth() &&
-          saleDate.getFullYear() === now.getFullYear()
-        );
-      });
-    } else if (filterType === "month") {
-      filtered = salesData.filter((sale) => {
-        const saleDate = new Date(sale.saleDate);
-        return (
-          saleDate.getMonth() === now.getMonth() &&
-          saleDate.getFullYear() === now.getFullYear()
-        );
-      });
-    } else if (filterType === "year") {
-      filtered = salesData.filter((sale) => {
-        const saleDate = new Date(sale.saleDate);
-        return saleDate.getFullYear() === now.getFullYear();
-      });
-    } else if (filterType === "custom" && selectedDate) {
-      filtered = salesData.filter((sale) => {
-        const saleDate = new Date(sale.saleDate);
-        return (
-          saleDate.getDate() === selectedDate.getDate() &&
-          saleDate.getMonth() === selectedDate.getMonth() &&
-          saleDate.getFullYear() === selectedDate.getFullYear()
-        );
-      });
-    } else {
-      filtered = salesData;
-    }
+  const filterSales = (salesData, paymentType, searchTerm) => {
+    let filtered = salesData;
 
     if (paymentType === "credit") {
       filtered = filtered.filter(
@@ -109,8 +138,8 @@ const FilterSection = ({
       filtered = filtered.filter((sale) => sale.paymentType === "fullyPaid");
     }
 
-    if (query) {
-      const lowerCaseQuery = query.toLowerCase();
+    if (searchTerm) {
+      const lowerCaseQuery = searchTerm.toLowerCase();
       filtered = filtered.filter(
         (sale) =>
           sale.patient.name.toLowerCase().includes(lowerCaseQuery) ||
@@ -122,7 +151,9 @@ const FilterSection = ({
       );
     }
 
-    filtered.sort((a, b) => new Date(b.saleDate) - new Date(a.saleDate));
+    filtered = [...filtered].sort(
+      (a, b) => new Date(b.saleDate) - new Date(a.saleDate),
+    );
     setFilteredSales(filtered);
   };
 

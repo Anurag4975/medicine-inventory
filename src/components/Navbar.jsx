@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
 import { signOut } from "firebase/auth";
 import { auth } from "../firebase";
+import ReadMonitor from "./ReadMonitor";
 import {
   AppBar,
   Toolbar,
@@ -29,6 +30,8 @@ import {
   BarChart as ChartsIcon,
   Dashboard as DashboardIcon,
   AssignmentReturn as ReturnsIcon,
+  Payment as PaymentIcon,
+  Biotech as BiotechIcon,
 } from "@mui/icons-material";
 import OfflineIndicator from "./OfflineIndicator";
 
@@ -59,16 +62,22 @@ const navItems = [
     roles: ["admin", "staff"],
   },
   {
-    label: "Sales Report",
-    path: "/insights",
-    icon: <AssessmentIcon fontSize="small" />,
+    label: "Lab Billing",
+    path: "/lab-billing",
+    icon: <PaymentIcon fontSize="small" />,
     roles: ["admin", "staff"],
   },
   {
     label: "Lab Tests",
-    path: "/lab-tests",
-    icon: <ScienceIcon fontSize="small" />,
+    path: "/lab-workstation",
+    icon: <BiotechIcon fontSize="small" />,
     roles: ["admin", "lab"],
+  },
+  {
+    label: "Sales Report",
+    path: "/insights",
+    icon: <AssessmentIcon fontSize="small" />,
+    roles: ["admin", "staff"],
   },
   {
     label: "Patient Records",
@@ -172,14 +181,14 @@ function Navbar({ userRole }) {
               }}
             />
           )}
-          {/* Offline Indicator */}
           <OfflineIndicator />
+          <ReadMonitor />
         </Box>
 
         {/* Desktop Navigation */}
         {!isMobile ? (
           <Box sx={{ display: "flex", gap: 0.5, alignItems: "center" }}>
-            {filteredNavItems.slice(0, 6).map((item) => (
+            {filteredNavItems.slice(0, 7).map((item) => (
               <Button
                 key={item.label}
                 component={Link}
@@ -206,7 +215,7 @@ function Navbar({ userRole }) {
               </Button>
             ))}
 
-            {filteredNavItems.length > 6 && (
+            {filteredNavItems.length > 7 && (
               <>
                 <Button
                   onClick={handleMenuOpen}
@@ -239,7 +248,7 @@ function Navbar({ userRole }) {
                     },
                   }}
                 >
-                  {filteredNavItems.slice(6).map((item) => (
+                  {filteredNavItems.slice(7).map((item) => (
                     <MenuItem
                       key={item.label}
                       component={Link}

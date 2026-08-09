@@ -25,6 +25,8 @@ import {
   People as PeopleIcon,
   Dashboard as DashboardIcon,
   Undo as UndoIcon,
+  Payment as PaymentIcon,
+  Biotech as BiotechIcon,
 } from "@mui/icons-material";
 
 const iconColors = {
@@ -32,7 +34,8 @@ const iconColors = {
   "/sales": "#2196F3",
   "/insights": "#9C27B0",
   "/patient-registration": "#F44336",
-  "/lab-tests": "#00BCD4",
+  "/lab-billing": "#00BCD4",
+  "/lab-workstation": "#4CAF50",
   "/patient-records": "#795548",
   "/dashboard": "#607D8B",
   "/Returns": "#E91E63",
@@ -73,10 +76,16 @@ const navigationItems = [
     description: "Register new patients",
   },
   {
-    label: "Laboratory",
-    icon: <ScienceIcon sx={{ fontSize: 24 }} />,
-    path: "/lab-tests",
-    description: "Manage lab tests and results",
+    label: "Lab Billing",
+    icon: <PaymentIcon sx={{ fontSize: 24 }} />,
+    path: "/lab-billing",
+    description: "Process lab test payments",
+  },
+  {
+    label: "Lab Workstation",
+    icon: <BiotechIcon sx={{ fontSize: 24 }} />,
+    path: "/lab-workstation",
+    description: "Process lab tests and results",
   },
   {
     label: "Patient Records",
@@ -90,14 +99,12 @@ const navigationItems = [
     path: "/dashboard",
     description: "Doctors Management",
   },
-  // START: Clinical Charts Item Added
   {
     label: "Clinical Charts",
-    icon: <ScienceIcon sx={{ fontSize: 24 }} />, // Reusing ScienceIcon
+    icon: <ScienceIcon sx={{ fontSize: 24 }} />,
     path: "/clinical-charts",
-    description: "View and manage patient clinical charts (Vitals, BMI, etc.)",
+    description: "View and manage patient clinical charts",
   },
-  // END: Clinical Charts Item Added
   {
     label: "Returns & Refunds",
     icon: <UndoIcon sx={{ fontSize: 24 }} />,
@@ -130,8 +137,8 @@ function Home({ userRole }) {
     return hour < 12
       ? "Good Morning"
       : hour < 17
-      ? "Good Afternoon"
-      : "Good Evening";
+        ? "Good Afternoon"
+        : "Good Evening";
   };
 
   const getRoleDisplayName = (role) => {
@@ -231,7 +238,7 @@ function Home({ userRole }) {
                           transform: "scale(1.05)",
                           background: alpha(
                             iconColors[item.path] || "#9E9E9E",
-                            0.2
+                            0.2,
                           ),
                         },
                       },
@@ -247,7 +254,7 @@ function Home({ userRole }) {
                           borderRadius: "12px",
                           background: alpha(
                             iconColors[item.path] || "#9E9E9E",
-                            0.1
+                            0.1,
                           ),
                           display: "flex",
                           alignItems: "center",

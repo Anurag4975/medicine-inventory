@@ -22,20 +22,24 @@ import StaffDashboard from "./pages/StaffDashboard.jsx";
 import Sales from "./pages/Sales.jsx";
 import PatientRecords from "./pages/PatientRecords.jsx";
 import PatientRegistration from "./pages/PatientRegistration.jsx";
-import LabTests from "./pages/LabTests.jsx";
 import Returns from "./pages/Return.jsx";
 import Consulting from "./pages/Consulting.jsx";
 import ClinicalCharts from "./pages/ClinicalCharts/ClinicalCharts.jsx";
+import LabBilling from "./pages/LabBilling.jsx"; // NEW
+import LabWorkstation from "./pages/LabWorkstation.jsx"; // NEW
 
 function App() {
   const [userRole, setUserRole] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [cacheReady, setCacheReady] = useState(false);
 
-  // Initialize shared cache listeners ONCE - BEFORE routes render
   useEffect(() => {
     appCache.initialize();
-
+    const timer = setTimeout(() => {
+      setCacheReady(true);
+    }, 500);
     return () => {
+      clearTimeout(timer);
       appCache.destroy();
     };
   }, []);
@@ -44,7 +48,6 @@ function App() {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
         try {
-          // Check sessionStorage first
           const cachedRole = sessionStorage.getItem("userRole");
           if (cachedRole) {
             setUserRole(cachedRole);
@@ -74,10 +77,10 @@ function App() {
     return () => unsubscribe();
   }, []);
 
-  if (loading) {
+  if (loading || !cacheReady) {
     return (
       <div style={{ textAlign: "center", padding: "20px" }}>
-        <Typography variant="h6">Loading...</Typography>
+        <Typography variant="h6">Loading SADEV...</Typography>
       </div>
     );
   }
@@ -91,7 +94,7 @@ function App() {
           element={
             userRole ? (
               userRole === "lab" ? (
-                <Navigate to="/lab-tests" />
+                <Navigate to="/lab-workstation" />
               ) : (
                 <Navigate to="/home" />
               )
@@ -106,7 +109,7 @@ function App() {
             !userRole ? (
               <Login />
             ) : userRole === "lab" ? (
-              <Navigate to="/lab-tests" />
+              <Navigate to="/lab-workstation" />
             ) : (
               <Navigate to="/home" />
             )
@@ -177,16 +180,29 @@ function App() {
             )
           }
         />
+
+        {/* NEW Lab Routes */}
         <Route
-          path="/lab-tests"
+          path="/lab-billing"
           element={
-            ["admin", "lab"].includes(userRole) ? (
-              <LabTests />
+            ["admin", "staff"].includes(userRole) ? (
+              <LabBilling />
             ) : (
               <Navigate to="/login" />
             )
           }
         />
+        <Route
+          path="/lab-workstation"
+          element={
+            ["admin", "lab"].includes(userRole) ? (
+              <LabWorkstation />
+            ) : (
+              <Navigate to="/login" />
+            )
+          }
+        />
+
         <Route
           path="/Returns"
           element={
