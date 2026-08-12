@@ -1,5 +1,4 @@
 import { useState, useEffect, useMemo } from "react";
-import { appCache, CACHE_KEYS, cacheEvents } from "../utils/appCache";
 import {
   Box,
   Typography,
@@ -39,6 +38,8 @@ import {
   doc,
   writeBatch,
   serverTimestamp,
+  where,
+  limit,
 } from "firebase/firestore";
 
 function LabWorkstation() {
@@ -55,35 +56,63 @@ function LabWorkstation() {
     severity: "success",
   });
 
+  // Real-time listener for lab workstation orders (only billed/paid ones)
   useEffect(() => {
-    // Get cached data immediately
-    const cached = appCache.getCachedLabOrders();
-    if (cached && cached.length > 0) {
-      setLabOrders(cached);
-      setLoading(false);
-    }
+    const q = query(
+      collection(db, "labOrders"),
+      where("orderStatus", "in", [
+        "pending-collection",
+        "processing",
+        "completed",
+      ]),
+      orderBy("createdAt", "desc"),
+      limit(50),
+    );
 
-    // Subscribe to shared lab orders (NO new listener!)
-    const unsubscribe = cacheEvents.on(CACHE_KEYS.LAB_ORDERS, (data) => {
-      if (data && data.length > 0) {
-        setLabOrders(data);
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        const orders = snapshot.docs.map((doc) => ({
+          id: doc.id,
+          ...doc.data(),
+        }));
+        setLabOrders(orders);
         setLoading(false);
-      }
-    });
+      },
+      (error) => {
+        console.error("LabWorkstation error:", error);
+        setLoading(false);
+      },
+    );
 
     return () => unsubscribe();
   }, []);
 
+  // Helper to get tests that are NOT cancelled
+  const getActiveTests = (order) =>
+    (order.tests || []).filter((t) => t.billingStatus !== "cancelled");
+
   const pendingOrders = useMemo(
-    () => labOrders.filter((o) => o.orderStatus === "pending-collection"),
+    () =>
+      labOrders.filter(
+        (o) =>
+          o.orderStatus === "pending-collection" &&
+          getActiveTests(o).length > 0,
+      ),
     [labOrders],
   );
   const processingOrders = useMemo(
-    () => labOrders.filter((o) => o.orderStatus === "processing"),
+    () =>
+      labOrders.filter(
+        (o) => o.orderStatus === "processing" && getActiveTests(o).length > 0,
+      ),
     [labOrders],
   );
   const completedOrders = useMemo(
-    () => labOrders.filter((o) => o.orderStatus === "completed"),
+    () =>
+      labOrders.filter(
+        (o) => o.orderStatus === "completed" && getActiveTests(o).length > 0,
+      ),
     [labOrders],
   );
 
@@ -125,7 +154,8 @@ function LabWorkstation() {
   const handleOpenResults = (order) => {
     setSelectedOrder(order);
     const results = {};
-    (order.tests || []).forEach((test) => {
+    // Only show results for active tests
+    getActiveTests(order).forEach((test) => {
       results[test.name] = test.result || "";
     });
     setTestResults(results);
@@ -140,13 +170,19 @@ function LabWorkstation() {
       const batch = writeBatch(db);
       const orderRef = doc(db, "labOrders", selectedOrder.id);
 
-      const updatedTests = (selectedOrder.tests || []).map((test) => ({
-        ...test,
-        result: testResults[test.name] || "",
-        status: testResults[test.name]?.trim() ? "completed" : "pending",
-      }));
+      const updatedTests = (selectedOrder.tests || []).map((test) => {
+        if (test.billingStatus === "cancelled") return test; // keep cancelled unchanged
+        const newResult = testResults[test.name] || "";
+        return {
+          ...test,
+          result: newResult,
+          status: newResult.trim() ? "completed" : "pending",
+        };
+      });
 
-      const allCompleted = updatedTests.every((t) => t.result?.trim());
+      const allCompleted = updatedTests.every(
+        (t) => t.billingStatus === "cancelled" || t.result?.trim(),
+      );
 
       batch.update(orderRef, {
         tests: updatedTests,
@@ -156,9 +192,6 @@ function LabWorkstation() {
       });
 
       await batch.commit();
-
-      // Invalidate lab orders cache to force refresh
-      await appCache.invalidateLabOrders();
 
       setSnackbar({
         open: true,
@@ -253,66 +286,82 @@ function LabWorkstation() {
               </TableRow>
             </TableHead>
             <TableBody>
-              {currentOrders.map((order) => (
-                <TableRow key={order.id} hover>
-                  <TableCell>
-                    <Typography variant="body2" fontWeight="bold">
-                      {order.patientName}
-                    </Typography>
-                    <Typography variant="caption">
-                      {order.patientAge}/{order.patientGender}
-                    </Typography>
-                  </TableCell>
-                  <TableCell>
-                    {(order.tests || []).map((t, i) => (
-                      <Chip
-                        key={i}
-                        label={`${t.name} ${t.result ? "✓" : ""}`}
-                        size="small"
-                        color={t.result ? "success" : "default"}
-                        variant={t.result ? "filled" : "outlined"}
-                        sx={{ mr: 0.5, mb: 0.5 }}
-                      />
-                    ))}
-                  </TableCell>
-                  <TableCell>
-                    {order.createdAt?.toDate?.()?.toLocaleDateString() || "N/A"}
-                  </TableCell>
-                  <TableCell align="center">
-                    {order.orderStatus === "pending-collection" && (
-                      <Button
-                        variant="contained"
-                        size="small"
-                        color="primary"
-                        startIcon={<PlayArrowIcon />}
-                        onClick={() => handleStartProcessing(order)}
-                      >
-                        Start
-                      </Button>
-                    )}
-                    {(order.orderStatus === "processing" ||
-                      order.orderStatus === "pending-collection") && (
-                      <Button
-                        variant="outlined"
-                        size="small"
-                        startIcon={<SaveIcon />}
-                        onClick={() => handleOpenResults(order)}
-                        sx={{ ml: 1 }}
-                      >
-                        Results
-                      </Button>
-                    )}
-                    {order.orderStatus === "completed" && (
-                      <Chip
-                        label="Done"
-                        color="success"
-                        size="small"
-                        icon={<CheckCircleIcon />}
-                      />
-                    )}
-                  </TableCell>
-                </TableRow>
-              ))}
+              {currentOrders.map((order) => {
+                const activeTests = getActiveTests(order);
+                const cancelledCount =
+                  (order.tests || []).length - activeTests.length;
+
+                return (
+                  <TableRow key={order.id} hover>
+                    <TableCell>
+                      <Typography variant="body2" fontWeight="bold">
+                        {order.patientName}
+                      </Typography>
+                      <Typography variant="caption">
+                        {order.patientAge}/{order.patientGender}
+                      </Typography>
+                    </TableCell>
+                    <TableCell>
+                      {activeTests.map((t, i) => (
+                        <Chip
+                          key={i}
+                          label={`${t.name} ${t.result ? "✓" : ""}`}
+                          size="small"
+                          color={t.result ? "success" : "default"}
+                          variant={t.result ? "filled" : "outlined"}
+                          sx={{ mr: 0.5, mb: 0.5 }}
+                        />
+                      ))}
+                      {cancelledCount > 0 && (
+                        <Chip
+                          label={`+${cancelledCount} cancelled`}
+                          size="small"
+                          variant="outlined"
+                          color="default"
+                          sx={{ mr: 0.5, mb: 0.5 }}
+                        />
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      {order.createdAt?.toDate?.()?.toLocaleDateString() ||
+                        "N/A"}
+                    </TableCell>
+                    <TableCell align="center">
+                      {order.orderStatus === "pending-collection" && (
+                        <Button
+                          variant="contained"
+                          size="small"
+                          color="primary"
+                          startIcon={<PlayArrowIcon />}
+                          onClick={() => handleStartProcessing(order)}
+                        >
+                          Start
+                        </Button>
+                      )}
+                      {(order.orderStatus === "processing" ||
+                        order.orderStatus === "pending-collection") && (
+                        <Button
+                          variant="outlined"
+                          size="small"
+                          startIcon={<SaveIcon />}
+                          onClick={() => handleOpenResults(order)}
+                          sx={{ ml: 1 }}
+                        >
+                          Results
+                        </Button>
+                      )}
+                      {order.orderStatus === "completed" && (
+                        <Chip
+                          label="Done"
+                          color="success"
+                          size="small"
+                          icon={<CheckCircleIcon />}
+                        />
+                      )}
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
             </TableBody>
           </Table>
         </TableContainer>
@@ -337,7 +386,8 @@ function LabWorkstation() {
                   <strong>ID:</strong> {selectedOrder.patientId}
                 </Typography>
               </Paper>
-              {(selectedOrder.tests || []).map((test, i) => (
+              {/* Only show active tests */}
+              {getActiveTests(selectedOrder).map((test, i) => (
                 <Box key={i} sx={{ mb: 2 }}>
                   <Typography variant="subtitle2" gutterBottom>
                     {test.name}

@@ -5,7 +5,6 @@ import { doc, getDoc } from "firebase/firestore";
 import { auth, db } from "../firebase";
 import {
   Box,
-  Button,
   Grid,
   Typography,
   Card,
@@ -16,7 +15,6 @@ import {
   Avatar,
 } from "@mui/material";
 import {
-  Home as HomeIcon,
   Inventory as InventoryIcon,
   ShoppingCart as ShoppingCartIcon,
   Analytics as AnalyticsIcon,
@@ -168,6 +166,8 @@ function Home({ userRole }) {
                 fontWeight: 800,
                 background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
                 backgroundClip: "text",
+                WebkitBackgroundClip: "text",
+                WebkitTextFillColor: "transparent",
                 color: "transparent",
                 mb: 1,
                 fontSize: { xs: "1.8rem", md: "2.5rem" },

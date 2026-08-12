@@ -26,7 +26,7 @@ import {
 } from "firebase/firestore";
 import SelectedMedicines from "./MedicineSale/SelectedMedicines";
 
-function Returns() {
+function Returns({ userRole: propUserRole }) {
   const [billNumber, setBillNumber] = useState("");
   const [saleData, setSaleData] = useState(null);
   const [selectedMedicines, setSelectedMedicines] = useState([]);

@@ -229,7 +229,13 @@ function LabBilling() {
       const total = calculateTotal(selectedOrder.tests, discount, removedTests);
 
       const updatedTests = (selectedOrder.tests || []).map((t) => {
-        if (removedTests.includes(t.name)) return t;
+        if (removedTests.includes(t.name)) {
+          return {
+            ...t,
+            billingStatus: "cancelled",
+            cancelledAt: new Date().toISOString(),
+          };
+        }
         if (t.billingStatus === "billed" || t.billingStatus === "paid")
           return t;
         return {
@@ -243,7 +249,7 @@ function LabBilling() {
         (t) =>
           t.billingStatus === "billed" ||
           t.billingStatus === "paid" ||
-          removedTests.includes(t.name),
+          t.billingStatus === "cancelled",
       );
 
       const updateData = {

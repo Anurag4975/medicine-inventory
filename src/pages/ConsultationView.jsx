@@ -355,131 +355,136 @@ const ConsultationView = ({
       // =========================================================================
       // SMART LAB ORDER - No duplicate billing
       // =========================================================================
-      if (selectedTests.length > 0) {
-        let orderId = patient.currentLabOrderId;
-        let isNewOrder = !orderId;
+      // =========================================================================
+      // SMART LAB ORDER – handles additions, removals, and full cancellations
+      // =========================================================================
+      // =========================================================================
+      // SMART LAB ORDER – properly handles additions, removals, and cancellation
+      // =========================================================================
+      let orderId = patient.currentLabOrderId;
+      let isNewOrder = !orderId;
 
-        // If no currentLabOrderId, check for existing orders
-        if (!orderId) {
-          try {
-            const existingQuery = query(
-              collection(db, "labOrders"),
-              where("patientId", "==", patient.id),
-              orderBy("createdAt", "desc"),
-              limit(1),
+      // If no currentLabOrderId, check for an existing pending order
+      if (!orderId) {
+        try {
+          const existingQuery = query(
+            collection(db, "labOrders"),
+            where("patientId", "==", patient.id),
+            orderBy("createdAt", "desc"),
+            limit(1),
+          );
+          const existingSnapshot = await getDocs(existingQuery);
+          if (!existingSnapshot.empty) {
+            const latestOrder = existingSnapshot.docs[0].data();
+            const hasUnbilledTests = (latestOrder.tests || []).some(
+              (t) => t.billingStatus !== "billed" && t.billingStatus !== "paid",
             );
-            const existingSnapshot = await getDocs(existingQuery);
-
-            if (!existingSnapshot.empty) {
-              const latestOrder = existingSnapshot.docs[0].data();
-              const hasUnbilledTests = (latestOrder.tests || []).some(
-                (t) =>
-                  t.billingStatus !== "billed" && t.billingStatus !== "paid",
-              );
-
-              if (
-                hasUnbilledTests ||
-                latestOrder.orderStatus === "pending-billing"
-              ) {
-                orderId = existingSnapshot.docs[0].id;
-                isNewOrder = false;
-              } else {
-                orderId = doc(collection(db, "labOrders")).id;
-                isNewOrder = true;
-              }
-            } else {
-              orderId = doc(collection(db, "labOrders")).id;
-              isNewOrder = true;
+            if (
+              hasUnbilledTests ||
+              latestOrder.orderStatus === "pending-billing"
+            ) {
+              orderId = existingSnapshot.docs[0].id;
+              isNewOrder = false;
             }
-          } catch (e) {
-            orderId = doc(collection(db, "labOrders")).id;
-            isNewOrder = true;
           }
+        } catch (e) {}
+      }
+
+      // -----------------------------------------------------------------
+      // CASE 1: No tests selected → cancel any pending lab order
+      // -----------------------------------------------------------------
+      if (selectedTests.length === 0) {
+        if (orderId) {
+          const labOrderRef = doc(db, "labOrders", orderId);
+          const snap = await getDoc(labOrderRef);
+          const currentTests = snap.exists ? snap.data().tests || [] : [];
+          batch.update(labOrderRef, {
+            orderStatus: "cancelled",
+            paymentStatus: "cancelled",
+            updatedAt: now,
+            tests: currentTests.map((t) => ({
+              ...t,
+              billingStatus: "cancelled",
+            })),
+          });
+          patientUpdate.currentLabOrderId = null;
+        }
+      }
+      // -----------------------------------------------------------------
+      // CASE 2: Tests selected → create or update the lab order
+      // -----------------------------------------------------------------
+      else {
+        // Create a new order if none exists
+        if (!orderId) {
+          orderId = doc(collection(db, "labOrders")).id;
+          isNewOrder = true;
         }
 
         const labOrderRef = doc(db, "labOrders", orderId);
 
-        // Get existing tests
-        // REPLACE this section (around line 200-230) in saveConsultation:
-
-        // Get existing tests
         let existingTests = [];
         if (!isNewOrder) {
           try {
-            const existingDoc = await getDoc(doc(db, "labOrders", orderId));
+            const existingDoc = await getDoc(labOrderRef);
             if (existingDoc.exists())
               existingTests = existingDoc.data().tests || [];
           } catch (e) {}
         }
 
-        // Separate already billed tests
+        // Separate already billed tests (they stay untouched)
         const alreadyBilledTests = existingTests.filter(
           (t) => t.billingStatus === "billed" || t.billingStatus === "paid",
         );
         const alreadyBilledNames = alreadyBilledTests.map((t) => t.name);
 
-        // Get all existing test names (to prevent duplicates)
-        const allExistingNames = existingTests.map((t) => t.name);
+        // From the existing unbilled tests, keep only those still selected
+        const keptUnbilledTests = existingTests
+          .filter(
+            (t) => t.billingStatus !== "billed" && t.billingStatus !== "paid",
+          )
+          .filter((t) => selectedTests.some((st) => st.name === t.name))
+          .map((t) => {
+            const updatedSelection = selectedTests.find(
+              (st) => st.name === t.name,
+            );
+            return {
+              ...t,
+              price: updatedSelection.price ?? t.price,
+              result: currentTestResults[t.name] || t.result,
+              updatedAt: now,
+            };
+          });
 
-        // New tests: ones that DON'T exist in the order at all
-        const newTestsToBill = selectedTests
+        // Add brand-new tests (not already in the order)
+        const allExistingNames = existingTests.map((t) => t.name);
+        const newTests = selectedTests
           .filter((test) => !allExistingNames.includes(test.name))
           .map((test) => ({
             testId: test.id || null,
             name: test.name,
-            price: test.price != null ? test.price : null,
+            price: test.price ?? null,
             resultFormat: test.resultFormat || null,
             result: currentTestResults[test.name] || null,
             billingStatus: "pending",
             addedAt: now,
           }));
 
-        // Update existing unbilled tests (don't duplicate!)
-        const updatedExistingTests = existingTests
-          .filter(
-            (t) => t.billingStatus !== "billed" && t.billingStatus !== "paid",
-          )
-          .map((t) => {
-            const updatedTest = selectedTests.find((st) => st.name === t.name);
-            if (updatedTest) {
-              return {
-                ...t,
-                price: updatedTest.price != null ? updatedTest.price : t.price,
-                result: currentTestResults[t.name] || t.result,
-                updatedAt: now,
-              };
-            }
-            return t;
-          });
-
-        // Remove duplicates from updatedExistingTests
-        const uniqueUpdatedTests = [];
-        const seenNames = new Set();
-        updatedExistingTests.forEach((t) => {
-          if (!seenNames.has(t.name)) {
-            seenNames.add(t.name);
-            uniqueUpdatedTests.push(t);
-          }
-        });
-
-        // Combine: billed + updated + new (NO duplicates)
-        const allTests = [
+        // Combine and deduplicate
+        const combined = [
           ...alreadyBilledTests,
-          ...uniqueUpdatedTests,
-          ...newTestsToBill,
+          ...keptUnbilledTests,
+          ...newTests,
         ];
-
-        // Final deduplication safety check
         const finalTests = [];
-        const finalNames = new Set();
-        allTests.forEach((t) => {
-          if (!finalNames.has(t.name)) {
-            finalNames.add(t.name);
+        const seen = new Set();
+        combined.forEach((t) => {
+          if (!seen.has(t.name)) {
+            seen.add(t.name);
             finalTests.push(t);
           }
         });
 
-        const hasPendingBilling = finalTests.some(
+        const hasPending = finalTests.some(
           (t) => t.billingStatus === "pending",
         );
 
@@ -499,8 +504,11 @@ const ConsultationView = ({
           orderData.createdAt = now;
           orderData.orderStatus = "pending-billing";
           orderData.paymentStatus = "unpaid";
-        } else if (hasPendingBilling && newTestsToBill.length > 0) {
+        } else if (hasPending) {
           orderData.orderStatus = "pending-billing";
+        } else {
+          // All tests are either billed or cancelled → mark as pending-collection
+          orderData.orderStatus = "pending-collection";
         }
 
         batch.set(labOrderRef, orderData, { merge: true });

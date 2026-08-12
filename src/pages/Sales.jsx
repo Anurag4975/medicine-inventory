@@ -61,7 +61,10 @@ function Sales() {
   });
   const [discount, setDiscount] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("Cash");
+
+  // FIXED: userRole as proper state instead of undefined propUserRole
   const [userRole, setUserRole] = useState(null);
+
   const [searchTerm, setSearchTerm] = useState("");
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
   const [processing, setProcessing] = useState(false);
@@ -134,7 +137,7 @@ function Sales() {
     return () => unsubscribe();
   }, []);
 
-  // Auth
+  // Auth - now properly sets userRole state
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
